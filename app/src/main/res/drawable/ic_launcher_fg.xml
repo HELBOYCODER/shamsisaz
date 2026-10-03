@@ -1,0 +1,15 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#0F7B4A" android:pathData="M0,0h108v108h-108z"/>
+    <!-- خورشید شمسی -->
+    <path android:fillColor="#FFC107" android:pathData="M54,28a16,16 0 1,0 0.1,0z"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M54,38a6,6 0 1,0 0.1,0z"/>
+    <!-- پرتوها -->
+    <path android:fillColor="#FFD54F" android:pathData="M54,10v8 M54,90v8 M30,54h-8 M86,54h8 M37,37l-5,-5 M76,76l5,5 M37,71l-5,5 M76,32l5,-5"/>
+    <!-- تقویم -->
+    <path android:fillColor="#FFFFFF" android:pathData="M34,62h40a4,4 0 0,1 4,4v22a4,4 0 0,1 -4,4h-40a4,4 0 0,1 -4,-4v-22a4,4 0 0,1 4,-4z"/>
+    <path android:fillColor="#0F7B4A" android:pathData="M34,62h40a4,4 0 0,1 4,4v8h-48v-8a4,4 0 0,1 4,-4z"/>
+    <path android:fillColor="#FF9800" android:pathData="M42,58v8 M66,58v8"/>
+    <!-- عدد شمسی -->
+    <path android:fillColor="#0F7B4A" android:pathData="M46,80h4v-6h-4z M52,80h4v-6h-4z"/>
+    <path android:fillColor="#0F7B4A" android:pathData="M44,72h20v2h-20z"/>
+</vector>

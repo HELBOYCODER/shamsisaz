@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">شمسی‌ساز</string>
+    <string name="app_name_en">ShamsiSaz</string>
+    <string name="subtitle">تبدیل تقویم میلادی به شمسی — کل گوشی</string>
+    <string name="btn_magic">✨ تبدیل کل تقویم به شمسی</string>
+    <string name="btn_settings">⚙️ تنظیمات سیستم</string>
+    <string name="btn_preview">👁 پیش‌نمایش قبل از تبدیل</string>
+    <string name="btn_undo">↩️ بازگردانی</string>
+    <string name="btn_open_system_settings">باز کردن تنظیمات سیستم</string>
+    <string name="settings_title">تنظیمات شمسی‌ساز</string>
+    <string name="tile_label">شمسی‌ساز</string>
+    <string name="tile_desc">تبدیل تقویم به شمسی</string>
+    <string name="status_idle">آماده — یک دکمه تا شمسی شدن</string>
+    <string name="status_converting">در حال تبدیل…</string>
+    <string name="status_done">✅ همهٔ رویدادها به شمسی تبدیل شد!</string>
+    <string name="status_preview">🔍 پیش‌نمایش:</string>
+    <string name="status_no_events">هیچ رویدادی یافت نشد</string>
+    <string name="status_permission_needed">برای ادامه دسترسی تقویم را بدهید</string>
+    <string name="brand_detected">گوشی شناسایی شد: %1$s</string>
+    <string name="system_locale_hint">پیشنهاد: زبان سیستم را فارسی کنید تا تاریخ‌ها در تقویم سامسونگ/شیائومی خودکار فارسی شوند.\nSettings → Language → فارسی</string>
+    <string name="miui_hint">شیائومی: برای اعمال کامل، از تنظیمات → زبان و منطقه → فارسی را انتخاب کنید.</string>
+    <string name="oneui_hint">سامسونگ: تنظیمات → مدیریت عمومی → زبان → فارسی — سپس تقویم را باز کنید.</string>
+    <string name="notify_title">شمسی‌ساز</string>
+    <string name="notify_done">تبدیل کامل شد — %1$d رویداد به شمسی</string>
+    <string name="dialog_preview_title">پیش‌نمایش تبدیل</string>
+    <string name="dialog_undo_title">بازگردانی</string>
+    <string name="dialog_undo_msg">آیا می‌خواهید همهٔ تغییرات را به حالت میلادی برگردانید؟</string>
+    <string name="btn_ok">تأیید</string>
+    <string name="btn_cancel">لغو</string>
+    <string name="perm_rationale">برای تبدیل تاریخ‌های تقویم، دسترسی خواندن و نوشتن تقویم لازم است.</string>
+    <string name="stats_events">رویدادها: %1$d</string>
+    <string name="stats_calendars">تقویم‌ها: %1$d</string>
+</resources>
