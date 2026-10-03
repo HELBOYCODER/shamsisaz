@@ -103,8 +103,8 @@ class CalendarConverter(private val context: Context) {
         val events = listEvents(limit)
         return events.mapNotNull { ev ->
             val original = ev.title ?: return@mapNotNull null
-            val converted = convertText(original)
-            if (converted != original) (original to converted) else null
+            val converted = convertText(original) ?: return@mapNotNull null
+            if (converted != original) Pair(original, converted) else null
         }
     }
 
