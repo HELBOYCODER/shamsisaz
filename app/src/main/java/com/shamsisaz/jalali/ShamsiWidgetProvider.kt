@@ -24,9 +24,9 @@ class ShamsiWidgetProvider : AppWidgetProvider() {
             val views = RemoteViews(context.packageName, R.layout.widget_shamsi)
 
             views.setTextViewText(R.id.widgetDayNumber, JalaliConverter.toPersianDigits(jalali.day.toString()))
-            views.setTextViewText(R.id.widgetMonthYear, "${jalali.monthName()} ${JalaliConverter.toPersianDigits(jalali.year.toString())}")
-            views.setTextViewText(R.id.widgetWeekday, jalali.weekdayName())
-            views.setTextViewText(R.id.widgetGregorian, jalali.gregorianDate.toString())
+            views.setTextViewText(R.id.widgetMonthYear, "${jalali.formatPersian().split(" ")[1]} ${JalaliConverter.toPersianDigits(jalali.year.toString())}")
+            views.setTextViewText(R.id.widgetWeekday, JalaliConverter.weekdayPersian(System.currentTimeMillis()))
+            views.setTextViewText(R.id.widgetGregorian, java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date()))
 
             val intent = Intent(context, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
             val pi = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
