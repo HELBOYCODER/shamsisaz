@@ -2,10 +2,14 @@ package com.shamsisaz.jalali
 
 import android.Manifest
 import android.app.AlertDialog
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.View
+import android.widget.ScrollView
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -15,6 +19,7 @@ import com.shamsisaz.jalali.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import rikka.shizuku.Shizuku
 
 class MainActivity : AppCompatActivity() {
 
@@ -36,34 +41,57 @@ class MainActivity : AppCompatActivity() {
         updateButtons()
     }
 
+    private val shizukuPermListener = Shizuku.OnRequestPermissionResultListener { _, grantResult ->
+        if (grantResult == PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(this, "✅ دسترسی شیزوکو داده شد — دوباره دکمه را بزن", Toast.LENGTH_LONG).show()
+        } else {
+            Toast.makeText(this, "❌ بدون دسترسی شیزوکو، فارسی‌سازی سیستمی ممکن نیست", Toast.LENGTH_LONG).show()
+        }
+        runOnUiThread { refreshShizukuCard() }
+    }
+
+    private val shizukuBinderListener = Shizuku.OnBinderReceivedListener { refreshShizukuCard() }
+    private val shizukuDeadListener = Shizuku.OnBinderDeadListener { refreshShizukuCard() }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         converter = CalendarConverter(this)
 
-        // هدر شمسی امروز
         val today = JalaliConverter.today()
         binding.tvToday.text = "امروز: ${today.formatPersian()} — ${JalaliConverter.toPersianDigits(today.formatNumeric())}"
         binding.tvBrand.text = getString(R.string.brand_detected, DeviceHelper.brandLabel())
         binding.tvHint.text = DeviceHelper.systemHint()
 
-        // دکمهٔ جادویی — درخواست خودکار دسترسی + تبدیل
         binding.btnMagic.setOnClickListener { onMagicClick() }
         binding.btnPreview.setOnClickListener { onPreview() }
         binding.btnUndo.setOnClickListener { onUndo() }
-        // کارت تبدیل سیستمی — مخصوص A336E: اول تلاش App locale، بعد هدایت به تنظیمات سامسونگ
-        // ویوی جدید tvSystemStatus در layout اضافه می‌شود
         binding.btnSystemSettings.setOnClickListener { onSystemSettingsClick() }
-        try { findViewById<com.google.android.material.button.MaterialButton>(resources.getIdentifier("btnOverlay","id",packageName))?.setOnClickListener { openOverlaySettings() } } catch (_: Exception) {}
         binding.btnSystemQuickFix.setOnClickListener { onQuickFixClick() }
         binding.btnOpenCalendar.setOnClickListener { DeviceHelper.openCalendarApp(this) }
+        try { binding.btnOverlay.setOnClickListener { openOverlaySettings() } } catch (_: Exception) {}
 
-        // درخواست خودکار دسترسی‌ها در شروع (بدون اذیت مکرر)
+        // 👻 ارواح فارسی — دکمه اصلی فارسی‌ساز کامل
+        binding.btnPersianize.setOnClickListener { onPersianizeClick() }
+        binding.btnShizukuInstall.setOnClickListener { openShizukuInstall() }
+        binding.btnShizukuStart.setOnClickListener { openShizukuStartGuide() }
+        binding.btnShizukuPerm.setOnClickListener { requestShizukuPerm() }
+
+        Shizuku.addRequestPermissionResultListener(shizukuPermListener)
+        Shizuku.addBinderReceivedListener(shizukuBinderListener)
+        Shizuku.addBinderDeadListener(shizukuDeadListener)
+
         autoRequestPermissionsIfNeeded()
-
         refreshStats()
         updateButtons()
+    }
+
+    override fun onDestroy() {
+        try { Shizuku.removeRequestPermissionResultListener(shizukuPermListener) } catch (_: Exception) {}
+        try { Shizuku.removeBinderReceivedListener(shizukuBinderListener) } catch (_: Exception) {}
+        try { Shizuku.removeBinderDeadListener(shizukuDeadListener) } catch (_: Exception) {}
+        super.onDestroy()
     }
 
     override fun onResume() {
@@ -85,12 +113,143 @@ class MainActivity : AppCompatActivity() {
         permLauncher.launch(perms.toTypedArray())
     }
 
-    private fun onMagicClick() {
-        if (!hasCalendarPermission()) {
-            autoRequestPermissionsIfNeeded()
+    // ============ 👻 ارواح فارسی: فارسی‌ساز کامل با یک دکمه ============
+
+    private fun onPersianizeClick() {
+        if (!hasCalendarPermission()) { autoRequestPermissionsIfNeeded(); return }
+        if (!ShizukuHelper.isInstalled(this)) {
+            showShizukuNeededDialog()
             return
         }
-        // تأیید نهایی قبل از تبدیل کل تقویم
+        if (!ShizukuHelper.isBinderAlive()) {
+            showShizukuStartDialog()
+            return
+        }
+        if (!ShizukuHelper.isPermissionGranted()) {
+            ShizukuHelper.requestPermission(this)
+            Toast.makeText(this, "🔑 در پنجره شیزوکو «Allow» را بزن، بعد دوباره دکمه را بزن", Toast.LENGTH_LONG).show()
+            return
+        }
+        runPersianize()
+    }
+
+    private fun runPersianize() {
+        binding.tvShizukuLog.text = "👻 ارواح فارسی شروع کردن…\n"
+        binding.tvShizukuLog.visibility = View.VISIBLE
+        binding.logScroll.visibility = View.VISIBLE
+        binding.btnPersianize.isEnabled = false
+        binding.btnPersianize.text = "👻 در حال فارسی‌سازی کل گوشی…"
+        lifecycleScope.launch {
+            val res = Persianizer.fullPersianize(this@MainActivity) { line ->
+                runOnUiThread {
+                    binding.tvShizukuLog.append(line + "\n")
+                    // اسکرول به آخر
+                    try {
+                        binding.logScroll.post { binding.logScroll.fullScroll(View.FOCUS_DOWN) }
+                    } catch (_: Exception) {}
+                }
+            }
+            withContext(Dispatchers.Main) {
+                binding.btnPersianize.isEnabled = true
+                binding.btnPersianize.text = "👻 فارسی‌سازی کامل کل گوشی"
+                binding.tvShizukuLog.append(if (res.ok) "\n🎉 تمام شد!" else "\n⚠️ کامل نشد — لاگ را بخوان")
+                refreshStats()
+                updateButtons()
+                if (res.ok) {
+                    Toast.makeText(this@MainActivity, "🎉 گوشی فارسی شد! تقویم را باز کن", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun showShizukuNeededDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("👻 قدم اول: نصب شیزوکو")
+            .setMessage("برای تغییر واقعی کل گوشی از داخل خود گوشی (بدون کامپیوتر، بدون روت)، اول اپ «Shizuku» را نصب کن:\n\n۱) دکمه نصب را بزن\n۲) شیزوکو را نصب کن و برگرد اینجا\n۳) قدم بعدی: روشن‌کردن با دیباگ وایرلس")
+            .setPositiveButton("📥 نصب شیزوکو") { _, _ -> openShizukuInstall() }
+            .setNegativeButton("بعداً", null)
+            .show()
+    }
+
+    private fun showShizukuStartDialog() {
+        val steps = if (Build.VERSION.SDK_INT >= 30) {
+            "روی همین گوشی، بدون کامپیوتر:\n\n" +
+            "۱) تنظیمات → درباره گوشی → ۷ بار روی «شماره ساخت» بزن (گزینه توسعه‌دهنده باز می‌شود)\n" +
+            "۲) تنظیمات → سیستم → گزینه‌های توسعه‌دهنده → «اشکال‌زدایی بی‌سیم» را روشن کن\n" +
+            "۳) اپ Shizuku را باز کن → «Pairing» → کد جفت‌سازی را بزن\n" +
+            "۴) در Shizuku روی «Start» بزن\n" +
+            "۵) برگرد اینجا و دکمه 👻 را بزن"
+        } else {
+            "روی کامپیوتر یک بار:\n\n" +
+            "۱) اپ Shizuku را نصب کن\n" +
+            "۲) گوشی را با کابل به کامپیوتر وصل کن\n" +
+            "۳) دستور: adb shell sh /sdcard/Android/data/moe.shizuku.privileged.api/start.sh\n" +
+            "۴) برگرد اینجا و دکمه 👻 را بزن"
+        }
+        AlertDialog.Builder(this)
+            .setTitle("🚀 روشن‌کردن شیزوکو")
+            .setMessage(steps)
+            .setPositiveButton("باز کردن شیزوکو") { _, _ -> openShizukuApp() }
+            .setNeutralButton("آموزش تصویری") { _, _ ->
+                try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/guide/setup/"))) } catch (_: Exception) {}
+            }
+            .setNegativeButton("باشه", null)
+            .show()
+    }
+
+    private fun openShizukuInstall() {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/download/")))
+        } catch (_: Exception) {
+            Toast.makeText(this, "مرورگر باز نشد", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun openShizukuApp() {
+        try {
+            val i = packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
+            if (i != null) startActivity(i)
+            else openShizukuInstall()
+        } catch (_: Exception) { openShizukuInstall() }
+    }
+
+    private fun openShizukuStartGuide() {
+        if (!ShizukuHelper.isInstalled(this)) { showShizukuNeededDialog(); return }
+        if (!ShizukuHelper.isBinderAlive()) { showShizukuStartDialog(); return }
+        Toast.makeText(this, "✅ شیزوکو روشن است", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun requestShizukuPerm() {
+        if (!ShizukuHelper.isInstalled(this)) { showShizukuNeededDialog(); return }
+        if (!ShizukuHelper.isBinderAlive()) { showShizukuStartDialog(); return }
+        if (ShizukuHelper.isPermissionGranted()) {
+            Toast.makeText(this, "✅ دسترسی قبلاً داده شده", Toast.LENGTH_SHORT).show()
+            return
+        }
+        ShizukuHelper.requestPermission(this)
+    }
+
+    private fun refreshShizukuCard() {
+        runOnUiThread {
+            try {
+                val st = ShizukuHelper.statusText(this)
+                binding.tvShizukuStatus.text = st
+                binding.tvShizukuStatus.visibility = View.VISIBLE
+                val ready = ShizukuHelper.isPermissionGranted()
+                // دکمه اصلی همیشه فعال — خودش قدم‌به‌قدم راهنمایی می‌کند
+                binding.btnPersianize.isEnabled = true
+                // دکمه‌ها را هوشمند کن
+                binding.btnShizukuInstall.text = if (ShizukuHelper.isInstalled(this)) "✅ شیزوکو نصب است" else "📥 قدم ۱: نصب شیزوکو"
+                binding.btnShizukuStart.text = if (ShizukuHelper.isBinderAlive()) "✅ شیزوکو روشن است" else "🚀 قدم ۲: روشن‌کردن شیزوکو"
+                binding.btnShizukuPerm.text = if (ready) "✅ دسترسی داده شده" else "🔑 قدم ۳: دادن دسترسی"
+            } catch (_: Exception) {}
+        }
+    }
+
+    // ============ تبدیل تقویم (مسیر قبلی، نگه داشته شده) ============
+
+    private fun onMagicClick() {
+        if (!hasCalendarPermission()) { autoRequestPermissionsIfNeeded(); return }
         AlertDialog.Builder(this)
             .setTitle("تبدیل کل تقویم به شمسی؟")
             .setMessage("همهٔ رویدادهای تقویم گوشی به تاریخ شمسی تبدیل می‌شوند.\nقابل بازگردانی با دکمهٔ «بازگردانی» است.")
@@ -104,11 +263,9 @@ class MainActivity : AppCompatActivity() {
         binding.progress.visibility = View.VISIBLE
         binding.btnMagic.isEnabled = false
         binding.progress.progress = 0
-
         lifecycleScope.launch(Dispatchers.IO) {
             val result = converter.convertAll(
-                addPrefix = true,
-                convertBody = true,
+                addPrefix = true, convertBody = true,
                 onProgress = { done, total ->
                     runOnUiThread {
                         if (total > 0) binding.progress.progress = (done * 100 / total)
@@ -119,15 +276,11 @@ class MainActivity : AppCompatActivity() {
             withContext(Dispatchers.Main) {
                 binding.progress.visibility = View.GONE
                 binding.btnMagic.isEnabled = true
-                if (result.converted > 0) {
-                    binding.tvStatus.text = "✅ ${result.converted} رویداد به شمسی شد! (${result.calendars} تقویم)"
-                    Toast.makeText(this@MainActivity, "تمام شد — ${result.converted} رویداد شمسی شد", Toast.LENGTH_LONG).show()
-                } else if (result.total == 0) {
-                    binding.tvStatus.text = getString(R.string.status_no_events)
-                } else {
-                    binding.tvStatus.text = "تغییری لازم نبود — همه شمسی هستند یا خالی"
+                binding.tvStatus.text = when {
+                    result.converted > 0 -> "✅ ${result.converted} رویداد به شمسی شد! (${result.calendars} تقویم)"
+                    result.total == 0 -> getString(R.string.status_no_events)
+                    else -> "تغییری لازم نبود — همه شمسی هستند یا خالی"
                 }
-                // نمایش راهنمای تنظیمات سیستم برای اعمال کامل در سامسونگ/شیائومی
                 binding.cardSystemHint.visibility = View.VISIBLE
                 refreshStats()
                 updateButtons()
@@ -136,10 +289,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onPreview() {
-        if (!hasCalendarPermission()) {
-            autoRequestPermissionsIfNeeded()
-            return
-        }
+        if (!hasCalendarPermission()) { autoRequestPermissionsIfNeeded(); return }
         lifecycleScope.launch(Dispatchers.IO) {
             val preview = converter.preview(15)
             withContext(Dispatchers.Main) {
@@ -182,10 +332,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshStats() {
-        if (!hasCalendarPermission()) {
-            binding.tvStats.text = "—"
-            return
-        }
+        if (!hasCalendarPermission()) { binding.tvStats.text = "—"; return }
         lifecycleScope.launch(Dispatchers.IO) {
             val cals = try { converter.listCalendars() } catch (_: Exception) { emptyList() }
             val events = try { converter.listEvents(1000) } catch (_: Exception) { emptyList() }
@@ -195,13 +342,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** باز کردن تنظیمات زبان — A336E سامسونگ مستقیم به صفحه Language */
     private fun onSystemSettingsClick() {
         DeviceHelper.openLanguageSettings(this)
         Toast.makeText(this, DeviceHelper.stepsForA336E(), Toast.LENGTH_LONG).show()
     }
 
-    /** تلاش یک‌تپ: لوکال اپ را فارسی کن + اگر WRITE_SECURE_SETTINGS بود system-wide، بعد راهنما */
     private fun onQuickFixClick() {
         val okApp = SystemLocaleHelper.trySetAppLocaleToPersian(this)
         val okSys = SystemLocaleHelper.trySetSystemLocaleViaSettings(this)
@@ -221,7 +366,6 @@ class MainActivity : AppCompatActivity() {
             }
             .setNeutralButton("باشه", null)
             .show()
-        // آپدیت نشانگر سیستمی
         refreshSystemStatus()
         refreshOverlayStatus()
     }
@@ -242,30 +386,29 @@ class MainActivity : AppCompatActivity() {
         binding.btnPreview.alpha = if (hasPerm) 1f else 0.4f
         refreshSystemStatus()
         refreshOverlayStatus()
+        refreshShizukuCard()
     }
 
     private fun openOverlaySettings() {
         try {
-            startActivity(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).apply { addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK) })
-            android.widget.Toast.makeText(this, "شمسی\u0633از را در لیست دسترس\u200cپذیری پیدا و فعال کنید — تاریخ پیام\u200cها زنده شمسی می\u200cشود", android.widget.Toast.LENGTH_LONG).show()
+            startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
+            Toast.makeText(this, "شمسی‌ساز را در لیست دسترس‌پذیری پیدا و فعال کنید — تاریخ پیام‌ها زنده شمسی می‌شود", Toast.LENGTH_LONG).show()
         } catch (_: Exception) { DeviceHelper.openLanguageSettings(this) }
     }
 
     private fun refreshOverlayStatus() {
         val enabled = ShamsiOverlayService.isEnabled(this)
-        val btnId = resources.getIdentifier("btnOverlay","id", packageName)
-        if (btnId != 0) {
-            findViewById<com.google.android.material.button.MaterialButton>(btnId)?.let { btn ->
-                btn.text = if (enabled) "✅ پوشش پیام\u200cها فعال است" else "👁️ فعال\u200cسازی پوشش پیام\u200cها (اختیاری)"
-            }
-        }
-        val tvId = resources.getIdentifier("tvOverlayStatus","id", packageName)
-        if (tvId != 0) {
-            findViewById<android.widget.TextView>(tvId)?.let { tv ->
-                tv.text = if (enabled) "✅ پوشش سیستمی فعال — تاریخ پیام\u200cها شمسی نمایش داده می\u200cشود" else "پوشش خاموش — فعال کنید تا تاریخ\u200cهای داخل پیام\u200cها هم زنده شمسی شود"
-                tv.visibility = android.view.View.VISIBLE
-            }
-        }
+        try {
+            binding.btnOverlay.text = if (enabled) "✅ پوشش پیام‌ها فعال است" else "👁️ فعال‌سازی پوشش پیام‌ها (اختیاری)"
+            binding.tvOverlayStatus.text = if (enabled) "✅ پوشش سیستمی فعال — تاریخ پیام‌ها شمسی نمایش داده می‌شود" else "پوشش خاموش — فعال کنید تا تاریخ‌های داخل پیام‌ها هم زنده شمسی شود"
+            binding.tvOverlayStatus.visibility = View.VISIBLE
+        } catch (_: Exception) {}
     }
 
+    private fun findTv(id: String): TextView? {
+        return try {
+            val rid = resources.getIdentifier(id, "id", packageName)
+            if (rid != 0) findViewById(rid) else null
+        } catch (_: Exception) { null }
+    }
 }
