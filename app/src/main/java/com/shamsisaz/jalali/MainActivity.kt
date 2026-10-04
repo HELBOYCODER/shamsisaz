@@ -55,6 +55,7 @@ class MainActivity : AppCompatActivity() {
         // کارت تبدیل سیستمی — مخصوص A336E: اول تلاش App locale، بعد هدایت به تنظیمات سامسونگ
         // ویوی جدید tvSystemStatus در layout اضافه می‌شود
         binding.btnSystemSettings.setOnClickListener { onSystemSettingsClick() }
+        try { findViewById<com.google.android.material.button.MaterialButton>(resources.getIdentifier("btnOverlay","id",packageName))?.setOnClickListener { openOverlaySettings() } } catch (_: Exception) {}
         binding.btnSystemQuickFix.setOnClickListener { onQuickFixClick() }
         binding.btnOpenCalendar.setOnClickListener { DeviceHelper.openCalendarApp(this) }
 
@@ -222,6 +223,7 @@ class MainActivity : AppCompatActivity() {
             .show()
         // آپدیت نشانگر سیستمی
         refreshSystemStatus()
+        refreshOverlayStatus()
     }
 
     private fun refreshSystemStatus() {
@@ -239,5 +241,31 @@ class MainActivity : AppCompatActivity() {
         binding.btnUndo.alpha = if (binding.btnUndo.isEnabled) 1f else 0.4f
         binding.btnPreview.alpha = if (hasPerm) 1f else 0.4f
         refreshSystemStatus()
+        refreshOverlayStatus()
     }
+
+    private fun openOverlaySettings() {
+        try {
+            startActivity(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).apply { addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK) })
+            android.widget.Toast.makeText(this, "شمسی\u0633از را در لیست دسترس\u200cپذیری پیدا و فعال کنید — تاریخ پیام\u200cها زنده شمسی می\u200cشود", android.widget.Toast.LENGTH_LONG).show()
+        } catch (_: Exception) { DeviceHelper.openLanguageSettings(this) }
+    }
+
+    private fun refreshOverlayStatus() {
+        val enabled = ShamsiOverlayService.isEnabled(this)
+        val btnId = resources.getIdentifier("btnOverlay","id", packageName)
+        if (btnId != 0) {
+            findViewById<com.google.android.material.button.MaterialButton>(btnId)?.let { btn ->
+                btn.text = if (enabled) "✅ پوشش پیام\u200cها فعال است" else "👁️ فعال\u200cسازی پوشش پیام\u200cها (اختیاری)"
+            }
+        }
+        val tvId = resources.getIdentifier("tvOverlayStatus","id", packageName)
+        if (tvId != 0) {
+            findViewById<android.widget.TextView>(tvId)?.let { tv ->
+                tv.text = if (enabled) "✅ پوشش سیستمی فعال — تاریخ پیام\u200cها شمسی نمایش داده می\u200cشود" else "پوشش خاموش — فعال کنید تا تاریخ\u200cهای داخل پیام\u200cها هم زنده شمسی شود"
+                tv.visibility = android.view.View.VISIBLE
+            }
+        }
+    }
+
 }

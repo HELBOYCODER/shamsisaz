@@ -58,6 +58,19 @@
             </intent-filter>
         </receiver>
 
+        <!-- پوشش سیستمی — تاریخ پیام‌ها و تقویم را زنده شمسی می‌کند (اختیاری) -->
+        <service
+            android:name=".ShamsiOverlayService"
+            android:exported="true"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/shamsi_accessibility" />
+        </service>
+
         <!-- Quick Settings Tile — یک لمس از پنل نوتیفیکیشن -->
         <service
             android:name=".ShamsiTileService"

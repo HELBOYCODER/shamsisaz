@@ -259,6 +259,34 @@
                     app:icon="@drawable/ic_settings"
                     app:iconSize="18dp" />
 
+                
+                <!-- پوشش سیستمی — تاریخ پیام‌ها -->
+                <TextView
+                    android:id="@+id/tvOverlayStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="پوشش خاموش — فعال کنید تا تاریخ\u200cهای پیام\u200cها شمسی شود"
+                    android:textSize="11sp"
+                    android:textColor="#6B7280"
+                    android:background="@drawable/bg_stats_chip"
+                    android:padding="10dp"
+                    android:visibility="visible"
+                    android:layout_marginTop="8dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnOverlay"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:text="👁️ فعال\u200cسازی پوشش پیام\u200cها (اختیاری)"
+                    android:textSize="13sp"
+                    android:layout_marginTop="6dp"
+                    app:cornerRadius="12dp"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:backgroundTint="#FFF3E0"
+                    android:textColor="#E65100"
+                    app:icon="@drawable/ic_magic"
+                    app:iconSize="18dp" />
+
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnOpenCalendar"
                     android:layout_width="match_parent"

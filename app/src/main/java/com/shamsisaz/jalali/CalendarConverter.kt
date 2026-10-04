@@ -110,11 +110,7 @@ class CalendarConverter(private val context: Context) {
 
     fun convertText(text: String?): String? {
         if (text.isNullOrBlank()) return text
-        // 1) تاریخ‌های میلادی داخل متن → شمسی
-        var out = JalaliConverter.convertDatesInText(text)
-        // 2) اگر متن فقط تاریخ میلادی isolated دارد، تاریخ شروع رویداد را هم به شمسی اضافه کن
-        // (این بخش در convertAll برای هر رویداد جداگانه اعمال می‌شود)
-        return out
+        return JalaliEngine.convertAll(text)
     }
 
     private fun needsConversion(title: String?): Boolean {
@@ -153,8 +149,8 @@ class CalendarConverter(private val context: Context) {
                 val jPretty = jDate.formatPersian() // 12 مهر 1403
 
                 var newTitle = ev.title ?: ""
-                // تاریخ‌های میلادی داخل عنوان را شمسی کن
-                newTitle = JalaliConverter.convertDatesInText(newTitle)
+                // هر تاریخ انگلیسی/عددی داخل عنوان را با موتور کامل شمسی کن
+                newTitle = JalaliEngine.convertAll(newTitle)
 
                 // اگر عنوان هنوز تاریخ نداشت، تاریخ شمسی رویداد را اضافه کن
                 if (addPrefix && !newTitle.contains(jStr) && !newTitle.contains(jPretty)) {
