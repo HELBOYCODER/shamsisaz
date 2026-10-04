@@ -221,13 +221,37 @@
                     android:lineSpacingExtra="2dp"
                     android:layout_marginTop="8dp" />
 
+                <TextView
+                    android:id="@+id/tvSystemStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="—"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/primary"
+                    android:background="@drawable/bg_stats_chip"
+                    android:padding="10dp"
+                    android:visibility="gone"
+                    android:layout_marginTop="10dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnSystemQuickFix"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:text="🇮🇷 تلاش سریع: فارسی‌سازی سیستمی (A336E)"
+                    android:textSize="13sp"
+                    android:layout_marginTop="10dp"
+                    app:cornerRadius="12dp"
+                    style="@style/Widget.Material3.Button"
+                    android:backgroundTint="@color/primary" />
+
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnSystemSettings"
                     android:layout_width="match_parent"
                     android:layout_height="48dp"
                     android:text="@string/btn_open_system_settings"
                     android:textSize="13sp"
-                    android:layout_marginTop="12dp"
+                    android:layout_marginTop="8dp"
                     app:cornerRadius="12dp"
                     style="@style/Widget.Material3.Button.TonalButton"
                     android:backgroundTint="@color/accent_light"

@@ -52,7 +52,10 @@ class MainActivity : AppCompatActivity() {
         binding.btnMagic.setOnClickListener { onMagicClick() }
         binding.btnPreview.setOnClickListener { onPreview() }
         binding.btnUndo.setOnClickListener { onUndo() }
-        binding.btnSystemSettings.setOnClickListener { DeviceHelper.openLanguageSettings(this) }
+        // کارت تبدیل سیستمی — مخصوص A336E: اول تلاش App locale، بعد هدایت به تنظیمات سامسونگ
+        // ویوی جدید tvSystemStatus در layout اضافه می‌شود
+        binding.btnSystemSettings.setOnClickListener { onSystemSettingsClick() }
+        binding.btnSystemQuickFix.setOnClickListener { onQuickFixClick() }
         binding.btnOpenCalendar.setOnClickListener { DeviceHelper.openCalendarApp(this) }
 
         // درخواست خودکار دسترسی‌ها در شروع (بدون اذیت مکرر)
@@ -191,11 +194,50 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** باز کردن تنظیمات زبان — A336E سامسونگ مستقیم به صفحه Language */
+    private fun onSystemSettingsClick() {
+        DeviceHelper.openLanguageSettings(this)
+        Toast.makeText(this, DeviceHelper.stepsForA336E(), Toast.LENGTH_LONG).show()
+    }
+
+    /** تلاش یک‌تپ: لوکال اپ را فارسی کن + اگر WRITE_SECURE_SETTINGS بود system-wide، بعد راهنما */
+    private fun onQuickFixClick() {
+        val okApp = SystemLocaleHelper.trySetAppLocaleToPersian(this)
+        val okSys = SystemLocaleHelper.trySetSystemLocaleViaSettings(this)
+        val locale = SystemLocaleHelper.currentLocaleTag()
+        val msg = when {
+            okSys -> "✅ لوکال سیستم به فارسی تغییر کرد ($locale) — تقویم خودکار شمسی می‌شود. اپ را ببند و باز کن."
+            okApp -> "✅ لوکال اپ به فارسی شد. برای کل گوشی: دکمهٔ «باز کردن تنظیمات زبان» → فارسی را اول کن."
+            else -> "برای کل گوشی:\n${DeviceHelper.stepsForA336E()}\n\nلوکال فعلی: $locale"
+        }
+        AlertDialog.Builder(this)
+            .setTitle("وضعیت لوکال: $locale")
+            .setMessage(msg)
+            .setPositiveButton("باز کردن تنظیمات") { _, _ -> DeviceHelper.openLanguageSettings(this) }
+            .setNegativeButton("کپی دستور ADB") { _, _ ->
+                SystemLocaleHelper.copyAdbCommand(this)
+                Toast.makeText(this, "دستور ADB کپی شد", Toast.LENGTH_SHORT).show()
+            }
+            .setNeutralButton("باشه", null)
+            .show()
+        // آپدیت نشانگر سیستمی
+        refreshSystemStatus()
+    }
+
+    private fun refreshSystemStatus() {
+        val locale = SystemLocaleHelper.currentLocaleTag()
+        val persian = SystemLocaleHelper.isPersianLocale()
+        binding.tvSystemStatus.text = if (persian) "✅ لوکال: $locale — تقویم سیستمی شمسی است"
+        else "⚠️ لوکال: $locale — برای شمسی شدن کل گوشی، فارسی را اول کن"
+        binding.tvSystemStatus.visibility = View.VISIBLE
+    }
+
     private fun updateButtons() {
         val hasPerm = hasCalendarPermission()
         binding.btnPreview.isEnabled = hasPerm
         binding.btnUndo.isEnabled = hasPerm && converter.hasBackup()
         binding.btnUndo.alpha = if (binding.btnUndo.isEnabled) 1f else 0.4f
         binding.btnPreview.alpha = if (hasPerm) 1f else 0.4f
+        refreshSystemStatus()
     }
 }
