@@ -79,7 +79,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnShizukuPerm.setOnClickListener { requestShizukuPerm() }
 
         Shizuku.addRequestPermissionResultListener(shizukuPermListener)
-        Shizuku.addBinderReceivedListener(shizukuBinderListener)
+        Shizuku.addBinderReceivedListenerSticky(shizukuBinderListener)
         Shizuku.addBinderDeadListener(shizukuDeadListener)
 
         autoRequestPermissionsIfNeeded()

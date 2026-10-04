@@ -7,12 +7,12 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 
 /**
- * پل شیزوکو — «ارواح فارسی» 😄
+ * پل شیزوکو — «ارواح فارسی» 👻
  * با Shizuku (دسترسی ADB از داخل خود گوشی، بدون روت و بدون کامپیوتر)
  * می‌توانیم لوکال کل سیستم را عوض کنیم — همان کاری که ADB با کابل می‌کند.
  *
- * نصب شیزوکو: https://shizuku.rikka.app/download/
- * روی A33 (اندروید ۱۳/۱۴): با Wireless Debugging داخل خود گوشی فعال می‌شود.
+ * اجرای دستور: متد newProcess در API 13 خصوصی است، پس با رفلکشن صدا می‌زنیم
+ * (رفلکشن روی کلاس خود شیزوکو — نه API مخفی اندروید — پس محدودیت Hidden API شاملش نمی‌شود).
  */
 object ShizukuHelper {
 
@@ -20,6 +20,7 @@ object ShizukuHelper {
 
     fun isInstalled(ctx: Context): Boolean {
         return try {
+            @Suppress("DEPRECATION")
             ctx.packageManager.getPackageInfo("moe.shizuku.privileged.api", 0)
             true
         } catch (_: Exception) { false }
@@ -47,7 +48,16 @@ object ShizukuHelper {
     /** اجرای یک دستور شل با هویت ADB — خروجی واقعی برمی‌گرداند */
     fun runShell(vararg cmd: String): Pair<Int, String> {
         return try {
-            val process = Shizuku.newProcess(arrayOf(*cmd), null, null)
+            val method = Shizuku::class.java.getDeclaredMethod(
+                "newProcess",
+                Array<String>::class.java,
+                Array<String>::class.java,
+                String::class.java
+            )
+            method.isAccessible = true
+            val process = method.invoke(
+                null, cmd.toList().toTypedArray(), null, null
+            ) as Process
             val sb = StringBuilder()
             try {
                 val r = BufferedReader(InputStreamReader(process.inputStream))
