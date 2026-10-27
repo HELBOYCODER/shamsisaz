@@ -4,144 +4,156 @@ import java.util.Calendar
 import java.util.TimeZone
 
 /**
- * تبدیل دقیق میلادی ↔ شمسی (جلالی)
- * الگوریتم بر اساس 33 ساله — تست شده برای 1900..2100
- * ponytail: برای دقت نجومی کامل از کتابخانه‌ی ICU4J استفاده کن؛ این پیاده‌سازی سبک و آفلاین است.
+ * تبدیل دقیق میلادی ↔ شمسی (جلالی) — پورت الگوریتم jalaali-js (معتبر برای سال‌های ۱۱۷۸ تا ۱۶۳۳ شمسی).
+ * کاملاً بدون وابستگی به اندروید تا روی JVM هم تست شود.
+ * خروجی در تست با ICU4J (PersianCalendar) برای ۱۳۰۰..۱۵۰۰ روز‌به‌روز مقایسه می‌شود.
  */
 object JalaliConverter {
 
-    private val persianMonths = arrayOf(
+    val monthNames = arrayOf(
         "فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
         "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"
     )
-    private val persianMonthsShort = arrayOf(
-        "فرو", "ارد", "خرد", "تیر", "مرد", "شهر",
-        "مهر", "آبا", "آذر", "دی", "بهم", "اسفن"
-    )
-    private val persianWeekDays = arrayOf(
-        "شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"
-    )
+    /** ایندکس ۰ = شنبه */
+    val weekDayNames = arrayOf("شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه")
 
-    private val gDaysInMonth = intArrayOf(31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
-    private val jDaysInMonth = intArrayOf(31, 31, 31, 31, 31, 31, 30, 30, 30, 30, 30, 29)
+    private val breaks = intArrayOf(
+        -61, 9, 38, 199, 426, 686, 756, 818, 1111, 1181, 1210, 1635, 2060, 2097, 2192, 2262, 2324, 2394, 2456, 3178
+    )
 
     data class JalaliDate(val year: Int, val month: Int, val day: Int) {
+        fun monthName(): String = monthNames[month - 1]
         fun formatNumeric(): String = "%04d/%02d/%02d".format(year, month, day)
-        fun formatPersian(): String = "$day ${persianMonths[month - 1]} $year"
-        fun formatShort(): String = "%02d ${persianMonthsShort[month - 1]}".format(day)
+        fun formatPersian(): String = "$day ${monthName()} $year"
+        fun formatShort(): String = "$day ${monthName()}"
+        fun toJdn(): Int = jalaliToJdn(year, month, day)
+        fun toGregorian(): GregorianDate = jdnToGregorian(toJdn())
+        /** ۰ = شنبه … ۶ = جمعه */
+        fun weekDay(): Int = weekDayOfJdn(toJdn())
     }
 
     data class GregorianDate(val year: Int, val month: Int, val day: Int)
 
-    fun gregorianToJalali(gy: Int, gm: Int, gd: Int): JalaliDate {
-        var gy2 = gy - 1600
-        var gm2 = gm - 1
-        var gd2 = gd - 1
+    private class JalCal(val leap: Int, val gy: Int, val march: Int)
 
-        var gDayNo = 365 * gy2 + (gy2 + 3) / 4 - (gy2 + 99) / 100 + (gy2 + 399) / 400
-        for (i in 0 until gm2) gDayNo += gDaysInMonth[i]
-        if (gm2 > 1 && ((gy % 4 == 0 && gy % 100 != 0) || (gy % 400 == 0))) gDayNo++
-        gDayNo += gd2
-
-        var jDayNo = gDayNo - 79
-        var jNp = jDayNo / 12053
-        jDayNo %= 12053
-        var jy = 979 + 33 * jNp + 4 * (jDayNo / 1461)
-        jDayNo %= 1461
-        if (jDayNo >= 366) {
-            jy += (jDayNo - 1) / 365
-            jDayNo = (jDayNo - 1) % 365
+    private fun jalCal(jy: Int, withoutLeap: Boolean = false): JalCal {
+        val bl = breaks.size
+        val gy = jy + 621
+        var leapJ = -14
+        var jp = breaks[0]
+        require(jy >= jp && jy < breaks[bl - 1]) { "Invalid Jalaali year $jy" }
+        var jump = 0
+        for (i in 1 until bl) {
+            val jm = breaks[i]
+            jump = jm - jp
+            if (jy < jm) break
+            leapJ += (jump / 33) * 8 + (jump % 33) / 4
+            jp = jm
         }
-        var jm = 0
-        var jd = 0
-        var i = 0
-        while (i < 11 && jDayNo >= jDaysInMonth[i]) {
-            jDayNo -= jDaysInMonth[i]
-            i++
+        var n = jy - jp
+        leapJ += (n / 33) * 8 + ((n % 33) + 3) / 4
+        if (jump % 33 == 4 && jump - n == 4) leapJ += 1
+        val leapG = gy / 4 - ((gy / 100 + 1) * 3) / 4 - 150
+        val march = 20 + leapJ - leapG
+        var leap = 0
+        if (!withoutLeap) {
+            if (jump - n < 6) n = n - jump + ((jump + 4) / 33) * 33
+            leap = ((n + 1) % 33 - 1) % 4
+            if (leap == -1) leap = 4
         }
-        jm = i + 1
-        jd = jDayNo + 1
-        return JalaliDate(jy, jm, jd)
+        return JalCal(leap, gy, march)
     }
 
-    fun jalaliToGregorian(jy: Int, jm: Int, jd: Int): GregorianDate {
-        var jy2 = jy - 979
-        var jm2 = jm - 1
-        var jd2 = jd - 1
-        var jDayNo = 365 * jy2 + (jy2 / 33) * 8 + (jy2 % 33 + 3) / 4
-        for (i in 0 until jm2) jDayNo += jDaysInMonth[i]
-        jDayNo += jd2
-        var gDayNo = jDayNo + 79
-        var gy = 1600 + 400 * (gDayNo / 146097)
-        gDayNo %= 146097
-        var leap = true
-        if (gDayNo >= 36525) {
-            gDayNo--
-            gy += 100 * (gDayNo / 36524)
-            gDayNo %= 36524
-            if (gDayNo >= 365) gDayNo++ else leap = false
-        }
-        gy += 4 * (gDayNo / 1461)
-        gDayNo %= 1461
-        if (gDayNo >= 366) {
-            leap = false
-            gDayNo--
-            gy += gDayNo / 365
-            gDayNo %= 365
-        }
-        var gm = 0
-        var gd = 0
-        var i = 0
-        while (gDayNo >= gDaysInMonth[i] + if (i == 1 && leap) 1 else 0) {
-            gDayNo -= gDaysInMonth[i] + if (i == 1 && leap) 1 else 0
-            i++
-        }
-        gm = i + 1
-        gd = gDayNo + 1
+    fun isLeap(jy: Int): Boolean = jalCal(jy).leap == 0
+
+    fun monthLength(jy: Int, jm: Int): Int = when {
+        jm <= 6 -> 31
+        jm <= 11 -> 30
+        else -> if (isLeap(jy)) 30 else 29
+    }
+
+    private fun gregorianToJdn(gy: Int, gm: Int, gd: Int): Int {
+        var d = ((gy + (gm - 8) / 6 + 100100) * 1461) / 4 + (153 * ((gm + 9) % 12) + 2) / 5 + gd - 34840408
+        d = d - (((gy + 100100 + (gm - 8) / 6) / 100) * 3) / 4 + 752
+        return d
+    }
+
+    private fun jdnToGregorian(jdn: Int): GregorianDate {
+        var j = 4 * jdn + 139361631
+        j += (((4 * jdn + 183187720) / 146097) * 3) / 4 * 4 - 3908
+        val i = ((j % 1461) / 4) * 5 + 308
+        val gd = (i % 153) / 5 + 1
+        val gm = (i / 153) % 12 + 1
+        val gy = j / 1461 - 100100 + (8 - gm) / 6
         return GregorianDate(gy, gm, gd)
+    }
+
+    fun jalaliToJdn(jy: Int, jm: Int, jd: Int): Int {
+        val r = jalCal(jy, true)
+        return gregorianToJdn(r.gy, 3, r.march) + (jm - 1) * 31 - (jm / 7) * (jm - 7) + jd - 1
+    }
+
+    private fun jdnToJalali(jdn: Int): JalaliDate {
+        val gy = jdnToGregorian(jdn).year
+        var jy = gy - 621
+        val r = jalCal(jy)
+        val jdn1f = gregorianToJdn(gy, 3, r.march)
+        var k = jdn - jdn1f
+        if (k >= 0) {
+            if (k <= 185) return JalaliDate(jy, 1 + k / 31, k % 31 + 1)
+            k -= 186
+        } else {
+            jy -= 1
+            k += 179
+            if (r.leap == 1) k += 1
+        }
+        return JalaliDate(jy, 7 + k / 30, k % 30 + 1)
+    }
+
+    fun gregorianToJalali(gy: Int, gm: Int, gd: Int): JalaliDate = jdnToJalali(gregorianToJdn(gy, gm, gd))
+
+    fun jalaliToGregorian(jy: Int, jm: Int, jd: Int): GregorianDate = jdnToGregorian(jalaliToJdn(jy, jm, jd))
+
+    fun gregorianJdn(gy: Int, gm: Int, gd: Int): Int = gregorianToJdn(gy, gm, gd)
+    fun fromJdn(jdn: Int): JalaliDate = jdnToJalali(jdn)
+    fun gregorianFromJdn(jdn: Int): GregorianDate = jdnToGregorian(jdn)
+
+    /** ۰ = شنبه … ۶ = جمعه */
+    fun weekDayOfJdn(jdn: Int): Int = ((jdn + 2) % 7 + 7) % 7
+
+    fun isGregorianLeap(y: Int): Boolean = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+    fun gregorianMonthLength(y: Int, m: Int): Int = when (m) {
+        2 -> if (isGregorianLeap(y)) 29 else 28
+        4, 6, 9, 11 -> 30
+        else -> 31
     }
 
     fun fromMillis(millis: Long, tz: TimeZone = TimeZone.getDefault()): JalaliDate {
         val cal = Calendar.getInstance(tz)
         cal.timeInMillis = millis
-        return gregorianToJalali(
-            cal.get(Calendar.YEAR),
-            cal.get(Calendar.MONTH) + 1,
-            cal.get(Calendar.DAY_OF_MONTH)
-        )
+        return gregorianToJalali(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH))
     }
 
-    fun today(): JalaliDate {
-        val c = Calendar.getInstance()
-        return gregorianToJalali(c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH))
-    }
+    fun today(): JalaliDate = fromMillis(System.currentTimeMillis())
 
-    fun weekdayPersian(millis: Long): String {
-        val cal = Calendar.getInstance()
+    fun todayJdn(): Int = today().toJdn()
+
+    fun weekdayPersian(millis: Long, tz: TimeZone = TimeZone.getDefault()): String {
+        val cal = Calendar.getInstance(tz)
         cal.timeInMillis = millis
-        // Calendar.SATURDAY =7 ... mapping to شنبه
-        val dow = cal.get(Calendar.DAY_OF_WEEK) // 1=Sunday
-        val map = mapOf(7 to 0, 1 to 1, 2 to 2, 3 to 3, 4 to 4, 5 to 5, 6 to 6)
-        return persianWeekDays[map[dow] ?: 1]
+        val jdn = gregorianToJdn(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH))
+        return weekDayNames[weekDayOfJdn(jdn)]
     }
 
     fun toPersianDigits(input: String): String {
-        val persian = arrayOf('۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹')
-        return input.map { if (it in '0'..'9') persian[it - '0'] else it }.joinToString("")
+        val sb = StringBuilder(input.length)
+        for (c in input) sb.append(if (c in '0'..'9') '۰' + (c - '0') else c)
+        return sb.toString()
     }
 
-    // تبدیل تاریخ‌های میلادی داخل متن به شمسی (مثل 2024/10/05 یا 2024-10-05)
-    fun convertDatesInText(text: String): String {
-        if (text.isBlank()) return text
-        // الگو: YYYY/MM/DD یا YYYY-MM-DD
-        val regex = Regex("""\b(19|20)\d{2}[/-](0?[1-9]|1[0-2])[/-](0?[1-9]|[12]\d|3[01])\b""")
-        return regex.replace(text) { mr ->
-            try {
-                val parts = mr.value.split(Regex("[/-]"))
-                val gy = parts[0].toInt(); val gm = parts[1].toInt(); val gd = parts[2].toInt()
-                val j = gregorianToJalali(gy, gm, gd)
-                j.formatNumeric()
-            } catch (_: Exception) { mr.value }
-        }
-    }
+    fun fa(n: Int): String = toPersianDigits(n.toString())
+
+    /** «شنبه ۱۲ مهر ۱۴۰۵» با ارقام فارسی */
+    fun fullPersian(d: JalaliDate): String =
+        "${weekDayNames[d.weekDay()]} ${fa(d.day)} ${d.monthName()} ${fa(d.year)}"
 }

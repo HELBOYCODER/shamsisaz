@@ -2,20 +2,33 @@ package com.shamsisaz.jalali
 
 import android.Manifest
 import android.app.AlertDialog
+import android.appwidget.AppWidgetManager
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
+import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
+import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.updatePadding
 import androidx.lifecycle.lifecycleScope
-import com.shamsisaz.jalali.databinding.ActivityMainBinding
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.card.MaterialCardView
+import com.google.android.material.color.MaterialColors
+import com.google.android.material.materialswitch.MaterialSwitch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -23,392 +36,529 @@ import rikka.shizuku.Shizuku
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var binding: ActivityMainBinding
     private lateinit var converter: CalendarConverter
+    private lateinit var content: LinearLayout
 
-    private val permLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { grants ->
-        val calOk = grants[Manifest.permission.READ_CALENDAR] == true &&
-                grants[Manifest.permission.WRITE_CALENDAR] == true
-        if (calOk) {
-            binding.tvStatus.text = getString(R.string.status_idle)
-            refreshStats()
-        } else {
-            binding.tvStatus.text = getString(R.string.status_permission_needed)
-            Toast.makeText(this, "بدون دسترسی تقویم، تبدیل ممکن نیست", Toast.LENGTH_LONG).show()
-        }
-        updateButtons()
+    // هدر
+    private lateinit var tvTodayBig: TextView
+    private lateinit var tvTodaySub: TextView
+    private lateinit var tvTodayOcc: TextView
+    // تقویم
+    private lateinit var monthView: MonthView
+    private lateinit var tvMonthTitle: TextView
+    private lateinit var tvDayDetail: TextView
+    private var viewYear = 0
+    private var viewMonth = 0
+    // بخش‌های قابل‌به‌روزرسانی
+    private lateinit var permsBox: LinearLayout
+    private lateinit var tvHolidayStatus: TextView
+    private lateinit var tvConvertStatus: TextView
+    private lateinit var tvShizukuLog: TextView
+    private lateinit var swNotification: MaterialSwitch
+    private lateinit var swOverlay: MaterialSwitch
+    private lateinit var btnUndo: MaterialButton
+    private lateinit var btnPersianize: MaterialButton
+
+    private val permLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
+        if (grants[Manifest.permission.POST_NOTIFICATIONS] == true && Prefs.statusNotification(this)) Refresher.refreshAll(this)
+        refreshAll()
     }
 
-    private val shizukuPermListener = Shizuku.OnRequestPermissionResultListener { _, grantResult ->
-        if (grantResult == PackageManager.PERMISSION_GRANTED) {
-            Toast.makeText(this, "✅ دسترسی شیزوکو داده شد — دوباره دکمه را بزن", Toast.LENGTH_LONG).show()
-        } else {
-            Toast.makeText(this, "❌ بدون دسترسی شیزوکو، فارسی‌سازی سیستمی ممکن نیست", Toast.LENGTH_LONG).show()
+    private val shizukuPermListener = Shizuku.OnRequestPermissionResultListener { _, result ->
+        runOnUiThread {
+            toast(if (result == PackageManager.PERMISSION_GRANTED) "✅ دسترسی شیزوکو داده شد" else "❌ دسترسی شیزوکو رد شد")
+            refreshAll()
         }
-        runOnUiThread { refreshShizukuCard() }
     }
-
-    private val shizukuBinderListener = Shizuku.OnBinderReceivedListener { refreshShizukuCard() }
-    private val shizukuDeadListener = Shizuku.OnBinderDeadListener { refreshShizukuCard() }
+    private val shizukuBinderListener = Shizuku.OnBinderReceivedListener { runOnUiThread { refreshAll() } }
+    private val shizukuDeadListener = Shizuku.OnBinderDeadListener { runOnUiThread { refreshAll() } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityMainBinding.inflate(layoutInflater)
-        setContentView(binding.root)
         converter = CalendarConverter(this)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.decorView.layoutDirection = View.LAYOUT_DIRECTION_RTL
+        buildUi()
 
-        val today = JalaliConverter.today()
-        binding.tvToday.text = "امروز: ${today.formatPersian()} — ${JalaliConverter.toPersianDigits(today.formatNumeric())}"
-        binding.tvBrand.text = getString(R.string.brand_detected, DeviceHelper.brandLabel())
-        binding.tvHint.text = DeviceHelper.systemHint()
+        try {
+            Shizuku.addRequestPermissionResultListener(shizukuPermListener)
+            Shizuku.addBinderReceivedListenerSticky(shizukuBinderListener)
+            Shizuku.addBinderDeadListener(shizukuDeadListener)
+        } catch (_: Throwable) {}
 
-        binding.btnMagic.setOnClickListener { onMagicClick() }
-        binding.btnPreview.setOnClickListener { onPreview() }
-        binding.btnUndo.setOnClickListener { onUndo() }
-        binding.btnSystemSettings.setOnClickListener { onSystemSettingsClick() }
-        binding.btnSystemQuickFix.setOnClickListener { onQuickFixClick() }
-        binding.btnOpenCalendar.setOnClickListener { DeviceHelper.openCalendarApp(this) }
-        try { binding.btnOverlay.setOnClickListener { openOverlaySettings() } } catch (_: Exception) {}
+        val t = JalaliConverter.today()
+        viewYear = t.year; viewMonth = t.month
+        monthView.selected = t
+        showMonth()
+        showDay(t)
+        Refresher.refreshAll(this)
 
-        // 👻 ارواح فارسی — دکمه اصلی فارسی‌ساز کامل
-        binding.btnPersianize.setOnClickListener { onPersianizeClick() }
-        binding.btnShizukuInstall.setOnClickListener { openShizukuInstall() }
-        binding.btnShizukuStart.setOnClickListener { openShizukuStartGuide() }
-        binding.btnShizukuPerm.setOnClickListener { requestShizukuPerm() }
-
-        Shizuku.addRequestPermissionResultListener(shizukuPermListener)
-        Shizuku.addBinderReceivedListenerSticky(shizukuBinderListener)
-        Shizuku.addBinderDeadListener(shizukuDeadListener)
-
-        autoRequestPermissionsIfNeeded()
-        refreshStats()
-        updateButtons()
-    }
-
-    override fun onDestroy() {
-        try { Shizuku.removeRequestPermissionResultListener(shizukuPermListener) } catch (_: Exception) {}
-        try { Shizuku.removeBinderReceivedListener(shizukuBinderListener) } catch (_: Exception) {}
-        try { Shizuku.removeBinderDeadListener(shizukuDeadListener) } catch (_: Exception) {}
-        super.onDestroy()
+        // بار اول: دسترسی‌های اصلی را یک‌جا بخواه
+        val sp = getSharedPreferences("shamsisaz_ui", MODE_PRIVATE)
+        if (!sp.getBoolean("asked_basic_perms", false)) {
+            sp.edit().putBoolean("asked_basic_perms", true).apply()
+            requestBasicPermissions()
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        refreshStats()
-        updateButtons()
+        // اگر کاربر از تنظیمات برگشت یا روز عوض شده
+        val t = JalaliConverter.today()
+        tvTodayBig.text = JalaliConverter.fullPersian(t)
+        refreshAll()
     }
 
-    private fun hasCalendarPermission(): Boolean {
-        val r = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR)
-        val w = ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_CALENDAR)
-        return r == PackageManager.PERMISSION_GRANTED && w == PackageManager.PERMISSION_GRANTED
+    override fun onDestroy() {
+        try { Shizuku.removeRequestPermissionResultListener(shizukuPermListener) } catch (_: Throwable) {}
+        try { Shizuku.removeBinderReceivedListener(shizukuBinderListener) } catch (_: Throwable) {}
+        try { Shizuku.removeBinderDeadListener(shizukuDeadListener) } catch (_: Throwable) {}
+        super.onDestroy()
     }
 
-    private fun autoRequestPermissionsIfNeeded() {
-        if (hasCalendarPermission()) return
-        val perms = mutableListOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
-        if (Build.VERSION.SDK_INT >= 33) perms.add(Manifest.permission.POST_NOTIFICATIONS)
-        permLauncher.launch(perms.toTypedArray())
-    }
+    // ===================== ساخت رابط =====================
 
-    // ============ 👻 ارواح فارسی: فارسی‌ساز کامل با یک دکمه ============
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_LONG).show()
 
-    private fun onPersianizeClick() {
-        if (!hasCalendarPermission()) { autoRequestPermissionsIfNeeded(); return }
-        if (!ShizukuHelper.isInstalled(this)) {
-            showShizukuNeededDialog()
-            return
+    private fun attr(a: Int, fallback: Int) = MaterialColors.getColor(this, a, fallback)
+
+    private fun buildUi() {
+        val scroll = ScrollView(this).apply { isFillViewport = true; clipToPadding = false }
+        content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(16), dp(16), dp(32)) }
+        scroll.addView(content, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        setContentView(scroll)
+        ViewCompat.setOnApplyWindowInsetsListener(scroll) { v, insets ->
+            val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            v.updatePadding(top = bars.top, bottom = bars.bottom)
+            insets
         }
-        if (!ShizukuHelper.isBinderAlive()) {
-            showShizukuStartDialog()
-            return
+
+        // ---- هدر امروز ----
+        val header = card(attr(androidx.appcompat.R.attr.colorPrimary, 0xFF0F7B4A.toInt()))
+        val onPrimary = attr(com.google.android.material.R.attr.colorOnPrimary, 0xFFFFFFFF.toInt())
+        tvTodayBig = text("", 22f, onPrimary, bold = true)
+        tvTodaySub = text("", 13f, onPrimary)
+        tvTodayOcc = text("", 13f, onPrimary, bold = true)
+        header.addView(text("☀️ شمسی‌ساز", 13f, onPrimary))
+        header.addView(tvTodayBig, lpTop(6))
+        header.addView(tvTodaySub, lpTop(4))
+        header.addView(tvTodayOcc, lpTop(4))
+        val t = JalaliConverter.today()
+        tvTodayBig.text = JalaliConverter.fullPersian(t)
+        tvTodaySub.text = "${Occasions.gregorianLabel(t)}  •  ${Occasions.hijriLabel(t)}"
+        val occ = Occasions.forDay(t)
+        tvTodayOcc.text = occ.joinToString(" • ") { it.title }
+        tvTodayOcc.visibility = if (occ.isEmpty()) View.GONE else View.VISIBLE
+
+        // ---- تقویم ماهانه ----
+        val cal = card()
+        val nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val prev = iconBtn("›") { shiftMonth(-1) }
+        val next = iconBtn("‹") { shiftMonth(1) }
+        tvMonthTitle = text("", 18f, attr(com.google.android.material.R.attr.colorOnSurface, 0xFF000000.toInt()), bold = true).apply { gravity = Gravity.CENTER }
+        val todayBtn = button("امروز", outlined = true) {
+            val n = JalaliConverter.today(); viewYear = n.year; viewMonth = n.month; monthView.selected = n; showMonth(); showDay(n)
         }
-        if (!ShizukuHelper.isPermissionGranted()) {
-            ShizukuHelper.requestPermission(this)
-            Toast.makeText(this, "🔑 در پنجره شیزوکو «Allow» را بزن، بعد دوباره دکمه را بزن", Toast.LENGTH_LONG).show()
-            return
+        nav.addView(prev, LinearLayout.LayoutParams(dp(44), dp(44)))
+        nav.addView(tvMonthTitle, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        nav.addView(next, LinearLayout.LayoutParams(dp(44), dp(44)))
+        nav.addView(todayBtn)
+        cal.addView(nav)
+        monthView = MonthView(this).apply { onDaySelected = { showDay(it) } }
+        cal.addView(monthView, lpTop(4))
+        tvDayDetail = text("", 14f, attr(com.google.android.material.R.attr.colorOnSurface, 0xFF000000.toInt()))
+        cal.addView(tvDayDetail, lpTop(8))
+
+        // ---- دسترسی‌ها ----
+        val perms = card()
+        perms.addView(sectionTitle("🔑 دسترسی‌ها"))
+        perms.addView(note("هر مجوز فقط برای یک قابلیت مشخص است؛ هیچ داده‌ای از گوشی خارج نمی‌شود (اپ اینترنت ندارد)."))
+        permsBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        perms.addView(permsBox, lpTop(8))
+
+        // ---- ویجت و نوار وضعیت ----
+        val show = card()
+        show.addView(sectionTitle("🧩 نمایش همیشگی تاریخ شمسی"))
+        val wRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        wRow.addView(button("ویجت ماهانه") { pinWidget(ShamsiMonthWidgetProvider::class.java) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        wRow.addView(button("ویجت امروز", outlined = true) { pinWidget(ShamsiWidgetProvider::class.java) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) })
+        show.addView(wRow, lpTop(8))
+        swNotification = MaterialSwitch(this).apply {
+            text = "نمایش تاریخ شمسی در نوار وضعیت (عدد روز ماه کنار ساعت)"
+            setOnCheckedChangeListener { b, on -> if (b.isPressed) onNotificationToggle(on) }
         }
-        runPersianize()
+        show.addView(swNotification, lpTop(8))
+        show.addView(note("کاشی «تاریخ شمسی» را هم می‌توانید از ویرایش پنل تنظیمات سریع اضافه کنید."), lpTop(4))
+
+        // ---- مناسبت‌ها در تقویم گوشی ----
+        val hol = card()
+        hol.addView(sectionTitle("📅 مناسبت‌ها و تعطیلات در تقویم گوشی"))
+        hol.addView(note("یک تقویم محلی «مناسبت‌های ایران» می‌سازد (سال جاری و بعد) که در تقویم سامسونگ/شیائومی/گوگل دیده می‌شود. همگام‌سازی ابری ندارد و چندبار زدن، تکرار نمی‌سازد."))
+        tvHolidayStatus = note("")
+        hol.addView(tvHolidayStatus, lpTop(6))
+        val hRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        hRow.addView(button("افزودن / به‌روزرسانی") { onSyncHolidays() }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        hRow.addView(button("حذف", outlined = true) { onRemoveHolidays() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
+        hol.addView(hRow, lpTop(8))
+        hol.addView(button("باز کردن تقویم گوشی", outlined = true) { openCalendarApp() }, lpTop(4))
+
+        // ---- تبدیل تاریخ داخل رویدادها ----
+        val conv = card()
+        conv.addView(sectionTitle("🔁 تبدیل تاریخ‌های میلادیِ داخل رویدادها"))
+        conv.addView(note("اگر داخل عنوان/توضیح/مکان رویدادهای شما تاریخ میلادی نوشته شده (مثلاً «Meeting 4 October»)، به شمسی تبدیل می‌شود. فقط متن همان تاریخ عوض می‌شود. تقویم‌های فقط‌خواندنی دست نمی‌خورند و بازگردانی کامل است."))
+        tvConvertStatus = note("")
+        conv.addView(tvConvertStatus, lpTop(6))
+        val cRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        cRow.addView(button("پیش‌نمایش", outlined = true) { onPreview() }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        cRow.addView(button("تبدیل") { onConvert() }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) })
+        btnUndo = button("بازگردانی", outlined = true) { onUndo() }
+        cRow.addView(btnUndo, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) })
+        conv.addView(cRow, lpTop(8))
+
+        // ---- پوشش شمسی ----
+        val ov = card()
+        ov.addView(sectionTitle("👁️ پوشش شمسی روی صفحه (آزمایشی)"))
+        ov.addView(note("با سرویس دسترس‌پذیری، تاریخ‌های میلادیِ دیده‌شده روی صفحه (هدر تقویم، پیام‌ها، اعلان‌ها) با برچسب شمسی پوشانده می‌شوند. متن اپ‌های دیگر واقعاً تغییر نمی‌کند، فقط نمایش آن."))
+        swOverlay = MaterialSwitch(this).apply {
+            text = "فعال بودن پوشش"
+            setOnCheckedChangeListener { b, on -> if (b.isPressed) { Prefs.setScreenOverlay(this@MainActivity, on) } }
+        }
+        ov.addView(swOverlay, lpTop(6))
+
+        // ---- زبان سیستم ----
+        val sys = card()
+        sys.addView(sectionTitle("👻 فارسی‌سازی کل گوشی (شیزوکو)"))
+        sys.addView(note("زبان سیستم و برنامه‌های تقویم را از داخل خود گوشی به فارسی (با تقویم شمسی در اندروید ۱۴+) تغییر می‌دهد؛ بدون روت و بدون کامپیوتر. نیاز به نصب و روشن بودن Shizuku دارد. نتیجه روی هر برند فرق می‌کند؛ لاگ زیر نشان می‌دهد چه چیزی واقعاً عوض شد."))
+        sys.addView(button("باز کردن تنظیمات زبان گوشی", outlined = true) { openLanguageSettings() }, lpTop(8))
+        btnPersianize = button("👻 فارسی‌سازی کامل با شیزوکو") { onPersianize() }
+        sys.addView(btnPersianize, lpTop(4))
+        tvShizukuLog = text("", 12f, attr(com.google.android.material.R.attr.colorOnSurfaceVariant, 0xFF555555.toInt())).apply {
+            visibility = View.GONE; setTextIsSelectable(true); textDirection = View.TEXT_DIRECTION_RTL
+        }
+        sys.addView(tvShizukuLog, lpTop(8))
+
+        val foot = note("شمسی‌ساز ${versionName()} — متن‌باز (MIT) • مناسبت‌های قمری ممکن است تا یک روز با اعلام رسمی (رؤیت هلال) فرق کنند؛ جدول رسمی ۱۴۰۵ داخل اپ است.")
+        foot.gravity = Gravity.CENTER
+
+        for (v in listOf(header, cal, perms, show, hol, conv, ov, sys)) content.addView(v.parent as View, lpTop(12))
+        content.addView(foot, lpTop(16))
     }
 
-    private fun runPersianize() {
-        binding.tvShizukuLog.text = "👻 ارواح فارسی شروع کردن…\n"
-        binding.tvShizukuLog.visibility = View.VISIBLE
-        binding.logScroll.visibility = View.VISIBLE
-        binding.btnPersianize.isEnabled = false
-        binding.btnPersianize.text = "👻 در حال فارسی‌سازی کل گوشی…"
+    private fun versionName(): String = try {
+        packageManager.getPackageInfo(packageName, 0).versionName ?: ""
+    } catch (_: Exception) { "" }
+
+    // ---- ابزارهای ساخت ویو ----
+    private fun lpTop(dpTop: Int) = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(dpTop) }
+
+    /** کارت: خروجی همان LinearLayout داخلی است؛ ریشهٔ کارت `parent` آن است */
+    private fun card(bg: Int? = null): LinearLayout {
+        val inner = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(14), dp(16), dp(14)) }
+        MaterialCardView(this).apply {
+            radius = dp(20).toFloat(); cardElevation = 0f
+            if (bg != null) { setCardBackgroundColor(bg); strokeWidth = 0 } else strokeWidth = dp(1)
+            addView(inner)
+        }
+        return inner
+    }
+
+    private fun text(s: String, size: Float, color: Int, bold: Boolean = false) = TextView(this).apply {
+        text = s; textSize = size; setTextColor(color)
+        if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+        textDirection = View.TEXT_DIRECTION_RTL
+    }
+
+    private fun sectionTitle(s: String) = text(s, 16f, attr(com.google.android.material.R.attr.colorOnSurface, 0xFF000000.toInt()), bold = true)
+
+    private fun note(s: String) = text(s, 12.5f, attr(com.google.android.material.R.attr.colorOnSurfaceVariant, 0xFF555555.toInt())).apply {
+        setLineSpacing(0f, 1.15f)
+    }
+
+    private fun button(label: String, outlined: Boolean = false, onClick: () -> Unit): MaterialButton {
+        val style = if (outlined) com.google.android.material.R.attr.materialButtonOutlinedStyle else com.google.android.material.R.attr.materialButtonStyle
+        return MaterialButton(this, null, style).apply { text = label; isAllCaps = false; setOnClickListener { onClick() } }
+    }
+
+    private fun iconBtn(label: String, onClick: () -> Unit) = MaterialButton(this, null, com.google.android.material.R.attr.materialIconButtonStyle).apply {
+        text = label; textSize = 22f; setOnClickListener { onClick() }
+    }
+
+    // ===================== تقویم =====================
+
+    private fun shiftMonth(delta: Int) {
+        val idx = viewYear * 12 + (viewMonth - 1) + delta
+        viewYear = Math.floorDiv(idx, 12); viewMonth = Math.floorMod(idx, 12) + 1
+        showMonth()
+    }
+
+    private fun showMonth() {
+        monthView.show(viewYear, viewMonth)
+        tvMonthTitle.text = "${JalaliConverter.monthNames[viewMonth - 1]} ${JalaliConverter.fa(viewYear)}"
+    }
+
+    private fun showDay(d: JalaliConverter.JalaliDate) {
+        val sb = StringBuilder()
+        sb.append(JalaliConverter.fullPersian(d)).append('\n')
+        sb.append(Occasions.gregorianLabel(d)).append("  •  ").append(Occasions.hijriLabel(d))
+        val occ = Occasions.forDay(d)
+        if (d.weekDay() == 6 && occ.none { it.holiday }) sb.append("\n🔴 جمعه")
+        occ.forEach { sb.append("\n").append(if (it.holiday) "🔴 " else "🟢 ").append(it.title).append(if (it.holiday) " (تعطیل)" else "") }
+        if (occ.any { it.approximate }) sb.append("\n(تاریخ قمری تقریبی است)")
+        tvDayDetail.text = sb.toString()
+        if (hasCalendarPermission()) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                val ev = try { DayEvents.on(this@MainActivity, d) } catch (_: Exception) { emptyList() }
+                if (ev.isNotEmpty()) withContext(Dispatchers.Main) {
+                    if (monthView.selected == d) tvDayDetail.append("\n\n📌 رویدادهای تقویم شما:" + ev.joinToString("") { "\n• ${it.timeLabel} — ${it.title}" })
+                }
+            }
+        }
+    }
+
+    // ===================== دسترسی‌ها =====================
+
+    private fun hasCalendarPermission() =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_CALENDAR) == PackageManager.PERMISSION_GRANTED
+
+    private fun requestBasicPermissions() {
+        val list = mutableListOf<String>()
+        if (!hasCalendarPermission()) { list.add(Manifest.permission.READ_CALENDAR); list.add(Manifest.permission.WRITE_CALENDAR) }
+        if (Build.VERSION.SDK_INT >= 33 && !DateNotifier.canNotify(this)) list.add(Manifest.permission.POST_NOTIFICATIONS)
+        if (list.isNotEmpty()) permLauncher.launch(list.toTypedArray())
+    }
+
+    private fun isIgnoringBattery(): Boolean =
+        (getSystemService(POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(packageName)
+
+    private fun permRow(ok: Boolean, label: String, actionLabel: String, action: (() -> Unit)?) {
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val tv = text("${if (ok) "✅" else "⭕"} $label", 14f, attr(com.google.android.material.R.attr.colorOnSurface, 0xFF000000.toInt()))
+        row.addView(tv, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        if (!ok && action != null) row.addView(button(actionLabel, outlined = true) { action() })
+        permsBox.addView(row, lpTop(4))
+    }
+
+    private fun refreshAll() {
+        // ---- مجوزها ----
+        permsBox.removeAllViews()
+        permRow(hasCalendarPermission(), "تقویم (خواندن/نوشتن) — برای مناسبت‌ها، رویدادهای هر روز و تبدیل تاریخ‌ها", "اجازه") {
+            permLauncher.launch(arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR))
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            permRow(DateNotifier.canNotify(this), "اعلان‌ها — برای تاریخ در نوار وضعیت", "اجازه") {
+                permLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+            }
+        }
+        permRow(isIgnoringBattery(), "بدون محدودیت باتری — تا ویجت/نوار وضعیت سر نیمه‌شب حتماً به‌روز شوند", "اجازه") {
+            try {
+                startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
+            } catch (_: Exception) { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+        }
+        permRow(ShamsiOverlayService.isEnabled(this), "دسترس‌پذیری — برای پوشش شمسی روی صفحه", "روشن‌کردن") { enableAccessibility() }
+        val shizukuOk = ShizukuHelper.isPermissionGranted()
+        permRow(shizukuOk, "شیزوکو — ${ShizukuHelper.statusText(this)}", if (!ShizukuHelper.isInstalled(this)) "نصب" else if (!ShizukuHelper.isBinderAlive()) "راهنما" else "اجازه") { shizukuStep() }
+        permRow(
+            SystemLocale.has(this, SystemLocale.CHANGE_CONFIGURATION) && SystemLocale.has(this, SystemLocale.WRITE_SECURE_SETTINGS),
+            "مجوزهای ویژه (تغییر زبان سیستم، روشن‌کردن خودکار پوشش) — با شیزوکو داده می‌شود", "راهنما"
+        ) { showAdbDialog() }
+
+        // ---- کلیدها ----
+        swNotification.isChecked = Prefs.statusNotification(this) && DateNotifier.canNotify(this)
+        swOverlay.isChecked = Prefs.screenOverlay(this)
+
+        // ---- وضعیت مناسبت‌ها / تبدیل ----
+        val calOk = hasCalendarPermission()
+        tvHolidayStatus.text = when {
+            !calOk -> "برای استفاده، دسترسی تقویم را بدهید."
+            HolidayCalendar.isInstalled(this) -> "✅ تقویم «مناسبت‌های ایران» در گوشی نصب است."
+            else -> "هنوز اضافه نشده."
+        }
+        btnUndo.isEnabled = calOk && converter.hasBackup()
+        tvConvertStatus.text = if (!calOk) "برای استفاده، دسترسی تقویم را بدهید."
+        else if (converter.hasBackup()) "${JalaliConverter.fa(converter.backupCount())} رویداد تبدیل شده و قابل بازگردانی است."
+        else "تبدیلی انجام نشده."
+        btnPersianize.text = "👻 فارسی‌سازی کامل با شیزوکو"
+    }
+
+    private fun enableAccessibility() {
+        if (ShamsiOverlayService.tryEnable(this)) { toast("✅ پوشش شمسی روشن شد"); refreshAll(); return }
+        try {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            toast("«شمسی‌ساز» را در لیست پیدا و روشن کنید")
+        } catch (_: Exception) { toast("تنظیمات دسترس‌پذیری باز نشد") }
+    }
+
+    private fun showAdbDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("مجوزهای ویژه")
+            .setMessage("این دو مجوز عادی نیستند و فقط با ADB/شیزوکو داده می‌شوند:\n\n• تغییر زبان کل سیستم (CHANGE_CONFIGURATION)\n• روشن‌کردن خودکار پوشش (WRITE_SECURE_SETTINGS)\n\nساده‌ترین راه: Shizuku را نصب و روشن کنید و دکمهٔ «فارسی‌سازی کامل» را بزنید؛ خودش مجوزها را می‌دهد.\n\nیا با کامپیوتر:\n${SystemLocale.adbGrantCommand(this)}")
+            .setPositiveButton("باشه", null)
+            .setNeutralButton("کپی دستور") { _, _ ->
+                val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("adb", SystemLocale.adbGrantCommand(this)))
+                toast("کپی شد")
+            }
+            .show()
+    }
+
+    // ===================== شیزوکو =====================
+
+    private fun shizukuStep() {
+        when {
+            !ShizukuHelper.isInstalled(this) -> showShizukuNeededDialog()
+            !ShizukuHelper.isBinderAlive() -> showShizukuStartDialog()
+            !ShizukuHelper.isPermissionGranted() -> {
+                if (!ShizukuHelper.requestPermission()) {
+                    toast("دسترسی را از داخل خود برنامهٔ Shizuku (بخش Authorized apps) به شمسی‌ساز بدهید")
+                    openShizukuApp()
+                }
+            }
+            else -> toast("✅ شیزوکو آماده است")
+        }
+    }
+
+    private fun onPersianize() {
+        if (!ShizukuHelper.isPermissionGranted()) { shizukuStep(); return }
+        tvShizukuLog.text = "👻 شروع…\n"
+        tvShizukuLog.visibility = View.VISIBLE
+        btnPersianize.isEnabled = false
         lifecycleScope.launch {
-            val res = Persianizer.fullPersianize(this@MainActivity) { line ->
-                runOnUiThread {
-                    binding.tvShizukuLog.append(line + "\n")
-                    // اسکرول به آخر
-                    try {
-                        binding.logScroll.post { binding.logScroll.fullScroll(View.FOCUS_DOWN) }
-                    } catch (_: Exception) {}
-                }
-            }
-            withContext(Dispatchers.Main) {
-                binding.btnPersianize.isEnabled = true
-                binding.btnPersianize.text = "👻 فارسی‌سازی کامل کل گوشی"
-                binding.tvShizukuLog.append(if (res.ok) "\n🎉 تمام شد!" else "\n⚠️ کامل نشد — لاگ را بخوان")
-                refreshStats()
-                updateButtons()
-                if (res.ok) {
-                    Toast.makeText(this@MainActivity, "🎉 گوشی فارسی شد! تقویم را باز کن", Toast.LENGTH_LONG).show()
-                }
-            }
+            val res = Persianizer.fullPersianize(this@MainActivity) { line -> runOnUiThread { tvShizukuLog.append(line + "\n") } }
+            btnPersianize.isEnabled = true
+            Refresher.refreshAll(this@MainActivity)
+            refreshAll()
+            if (res.ok) toast("پایان — لاگ را بخوانید")
         }
     }
 
     private fun showShizukuNeededDialog() {
         AlertDialog.Builder(this)
-            .setTitle("👻 قدم اول: نصب شیزوکو")
-            .setMessage("برای تغییر واقعی کل گوشی از داخل خود گوشی (بدون کامپیوتر، بدون روت)، اول اپ «Shizuku» را نصب کن:\n\n۱) دکمه نصب را بزن\n۲) شیزوکو را نصب کن و برگرد اینجا\n۳) قدم بعدی: روشن‌کردن با دیباگ وایرلس")
-            .setPositiveButton("📥 نصب شیزوکو") { _, _ -> openShizukuInstall() }
-            .setNegativeButton("بعداً", null)
-            .show()
+            .setTitle("نصب Shizuku")
+            .setMessage("Shizuku دسترسی ADB را از داخل خود گوشی (بدون روت) در اختیار اپ‌ها می‌گذارد.\n\n۱) Shizuku را نصب کنید\n۲) آن را با «اشکال‌زدایی بی‌سیم» روشن کنید\n۳) به اینجا برگردید")
+            .setPositiveButton("دانلود Shizuku") { _, _ -> openUrl("https://shizuku.rikka.app/download/") }
+            .setNegativeButton("بعداً", null).show()
     }
 
     private fun showShizukuStartDialog() {
-        val steps = if (Build.VERSION.SDK_INT >= 30) {
-            "روی همین گوشی، بدون کامپیوتر:\n\n" +
-            "۱) تنظیمات → درباره گوشی → ۷ بار روی «شماره ساخت» بزن (گزینه توسعه‌دهنده باز می‌شود)\n" +
-            "۲) تنظیمات → سیستم → گزینه‌های توسعه‌دهنده → «اشکال‌زدایی بی‌سیم» را روشن کن\n" +
-            "۳) اپ Shizuku را باز کن → «Pairing» → کد جفت‌سازی را بزن\n" +
-            "۴) در Shizuku روی «Start» بزن\n" +
-            "۵) برگرد اینجا و دکمه 👻 را بزن"
-        } else {
-            "روی کامپیوتر یک بار:\n\n" +
-            "۱) اپ Shizuku را نصب کن\n" +
-            "۲) گوشی را با کابل به کامپیوتر وصل کن\n" +
-            "۳) دستور: adb shell sh /sdcard/Android/data/moe.shizuku.privileged.api/start.sh\n" +
-            "۴) برگرد اینجا و دکمه 👻 را بزن"
-        }
+        val steps = if (Build.VERSION.SDK_INT >= 30)
+            "روی همین گوشی:\n\n۱) تنظیمات → دربارهٔ گوشی → ۷ بار روی «شمارهٔ ساخت»\n۲) گزینه‌های توسعه‌دهنده → «اشکال‌زدایی بی‌سیم» را روشن کنید (به Wi‑Fi وصل باشید)\n۳) Shizuku را باز کنید → «Pairing» → کد جفت‌سازی را وارد کنید\n۴) در Shizuku «Start» بزنید\n۵) برگردید و دکمه را بزنید"
+        else
+            "اندروید قدیمی‌تر از ۱۱ یک‌بار به کامپیوتر نیاز دارد:\n\nadb shell sh /sdcard/Android/data/moe.shizuku.privileged.api/start.sh"
         AlertDialog.Builder(this)
-            .setTitle("🚀 روشن‌کردن شیزوکو")
-            .setMessage(steps)
-            .setPositiveButton("باز کردن شیزوکو") { _, _ -> openShizukuApp() }
-            .setNeutralButton("آموزش تصویری") { _, _ ->
-                try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/guide/setup/"))) } catch (_: Exception) {}
-            }
-            .setNegativeButton("باشه", null)
-            .show()
-    }
-
-    private fun openShizukuInstall() {
-        try {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/download/")))
-        } catch (_: Exception) {
-            Toast.makeText(this, "مرورگر باز نشد", Toast.LENGTH_SHORT).show()
-        }
+            .setTitle("روشن‌کردن Shizuku").setMessage(steps)
+            .setPositiveButton("باز کردن Shizuku") { _, _ -> openShizukuApp() }
+            .setNeutralButton("آموزش") { _, _ -> openUrl("https://shizuku.rikka.app/guide/setup/") }
+            .setNegativeButton("باشه", null).show()
     }
 
     private fun openShizukuApp() {
-        try {
-            val i = packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
-            if (i != null) startActivity(i)
-            else openShizukuInstall()
-        } catch (_: Exception) { openShizukuInstall() }
+        val i = packageManager.getLaunchIntentForPackage(ShizukuHelper.PACKAGE)
+        if (i != null) startActivity(i) else openUrl("https://shizuku.rikka.app/download/")
     }
 
-    private fun openShizukuStartGuide() {
-        if (!ShizukuHelper.isInstalled(this)) { showShizukuNeededDialog(); return }
-        if (!ShizukuHelper.isBinderAlive()) { showShizukuStartDialog(); return }
-        Toast.makeText(this, "✅ شیزوکو روشن است", Toast.LENGTH_SHORT).show()
+    private fun openUrl(u: String) {
+        try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u))) } catch (_: Exception) { toast("مرورگر پیدا نشد") }
     }
 
-    private fun requestShizukuPerm() {
-        if (!ShizukuHelper.isInstalled(this)) { showShizukuNeededDialog(); return }
-        if (!ShizukuHelper.isBinderAlive()) { showShizukuStartDialog(); return }
-        if (ShizukuHelper.isPermissionGranted()) {
-            Toast.makeText(this, "✅ دسترسی قبلاً داده شده", Toast.LENGTH_SHORT).show()
+    // ===================== قابلیت‌ها =====================
+
+    private fun pinWidget(cls: Class<*>) {
+        val awm = AppWidgetManager.getInstance(this)
+        if (Build.VERSION.SDK_INT >= 26 && awm.isRequestPinAppWidgetSupported) {
+            awm.requestPinAppWidget(ComponentName(this, cls), null, null)
+        } else toast("صفحهٔ اصلی را نگه دارید → ویجت‌ها → شمسی‌ساز")
+    }
+
+    private fun onNotificationToggle(on: Boolean) {
+        if (on && !DateNotifier.canNotify(this)) {
+            swNotification.isChecked = false
+            permLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+            toast("ابتدا اجازهٔ اعلان را بدهید، سپس دوباره روشن کنید")
             return
         }
-        ShizukuHelper.requestPermission(this)
+        Prefs.setStatusNotification(this, on)
+        Refresher.refreshAll(this)
     }
 
-    private fun refreshShizukuCard() {
-        runOnUiThread {
-            try {
-                val st = ShizukuHelper.statusText(this)
-                binding.tvShizukuStatus.text = st
-                binding.tvShizukuStatus.visibility = View.VISIBLE
-                val ready = ShizukuHelper.isPermissionGranted()
-                // دکمه اصلی همیشه فعال — خودش قدم‌به‌قدم راهنمایی می‌کند
-                binding.btnPersianize.isEnabled = true
-                // دکمه‌ها را هوشمند کن
-                binding.btnShizukuInstall.text = if (ShizukuHelper.isInstalled(this)) "✅ شیزوکو نصب است" else "📥 قدم ۱: نصب شیزوکو"
-                binding.btnShizukuStart.text = if (ShizukuHelper.isBinderAlive()) "✅ شیزوکو روشن است" else "🚀 قدم ۲: روشن‌کردن شیزوکو"
-                binding.btnShizukuPerm.text = if (ready) "✅ دسترسی داده شده" else "🔑 قدم ۳: دادن دسترسی"
-            } catch (_: Exception) {}
+    private fun openCalendarApp() {
+        try {
+            startActivity(Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_APP_CALENDAR); addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
+        } catch (_: Exception) {
+            try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("content://com.android.calendar/time"))) } catch (_: Exception) { toast("برنامهٔ تقویم پیدا نشد") }
         }
     }
 
-    // ============ تبدیل تقویم (مسیر قبلی، نگه داشته شده) ============
-
-    private fun onMagicClick() {
-        if (!hasCalendarPermission()) { autoRequestPermissionsIfNeeded(); return }
-        AlertDialog.Builder(this)
-            .setTitle("تبدیل کل تقویم به شمسی؟")
-            .setMessage("همهٔ رویدادهای تقویم گوشی به تاریخ شمسی تبدیل می‌شوند.\nقابل بازگردانی با دکمهٔ «بازگردانی» است.")
-            .setPositiveButton("بزن بریم ✨") { _, _ -> doConvert() }
-            .setNegativeButton("لغو", null)
-            .show()
+    private fun openLanguageSettings() {
+        for (a in listOf(Settings.ACTION_LOCALE_SETTINGS, Settings.ACTION_SETTINGS)) {
+            try { startActivity(Intent(a)); return } catch (_: Exception) {}
+        }
     }
 
-    private fun doConvert() {
-        binding.tvStatus.text = getString(R.string.status_converting)
-        binding.progress.visibility = View.VISIBLE
-        binding.btnMagic.isEnabled = false
-        binding.progress.progress = 0
-        lifecycleScope.launch(Dispatchers.IO) {
-            val result = converter.convertAll(
-                addPrefix = true, convertBody = true,
-                onProgress = { done, total ->
-                    runOnUiThread {
-                        if (total > 0) binding.progress.progress = (done * 100 / total)
-                        binding.tvStatus.text = "در حال تبدیل… $done / $total"
-                    }
-                }
-            )
-            withContext(Dispatchers.Main) {
-                binding.progress.visibility = View.GONE
-                binding.btnMagic.isEnabled = true
-                binding.tvStatus.text = when {
-                    result.converted > 0 -> "✅ ${result.converted} رویداد به شمسی شد! (${result.calendars} تقویم)"
-                    result.total == 0 -> getString(R.string.status_no_events)
-                    else -> "تغییری لازم نبود — همه شمسی هستند یا خالی"
-                }
-                binding.cardSystemHint.visibility = View.VISIBLE
-                refreshStats()
-                updateButtons()
-            }
+    private fun needCalendar(): Boolean {
+        if (hasCalendarPermission()) return false
+        permLauncher.launch(arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR))
+        return true
+    }
+
+    private fun onSyncHolidays() {
+        if (needCalendar()) return
+        lifecycleScope.launch {
+            val r = withContext(Dispatchers.IO) { runCatching { HolidayCalendar.sync(this@MainActivity) } }
+            r.onSuccess {
+                toast("✅ ${JalaliConverter.fa(it.events)} مناسبت (${JalaliConverter.fa(it.holidays)} تعطیل) برای ${JalaliConverter.fa(it.fromYear)} و ${JalaliConverter.fa(it.toYear)} اضافه شد")
+            }.onFailure { toast("خطا: ${it.message}") }
+            refreshAll()
+        }
+    }
+
+    private fun onRemoveHolidays() {
+        if (needCalendar()) return
+        lifecycleScope.launch {
+            val done = withContext(Dispatchers.IO) { runCatching { HolidayCalendar.remove(this@MainActivity) }.getOrDefault(false) }
+            toast(if (done) "تقویم مناسبت‌ها حذف شد" else "چیزی برای حذف نبود")
+            refreshAll()
         }
     }
 
     private fun onPreview() {
-        if (!hasCalendarPermission()) { autoRequestPermissionsIfNeeded(); return }
-        lifecycleScope.launch(Dispatchers.IO) {
-            val preview = converter.preview(15)
-            withContext(Dispatchers.Main) {
-                if (preview.isEmpty()) {
-                    Toast.makeText(this@MainActivity, "موردی برای پیش‌نمایش نیست", Toast.LENGTH_SHORT).show()
-                    return@withContext
-                }
-                val msg = preview.joinToString("\n\n") { (before, after) -> "• $before\n→ $after" }
-                AlertDialog.Builder(this@MainActivity)
-                    .setTitle(getString(R.string.dialog_preview_title))
-                    .setMessage(msg)
-                    .setPositiveButton(getString(R.string.btn_ok)) { _, _ -> }
-                    .setNeutralButton("تبدیل کن ✨") { _, _ -> doConvert() }
-                    .show()
-            }
+        if (needCalendar()) return
+        lifecycleScope.launch {
+            val p = withContext(Dispatchers.IO) { runCatching { converter.preview(15) }.getOrDefault(emptyList()) }
+            if (p.isEmpty()) { toast("هیچ رویدادی با تاریخ میلادی در متن پیدا نشد"); return@launch }
+            AlertDialog.Builder(this@MainActivity)
+                .setTitle("پیش‌نمایش (${JalaliConverter.fa(p.size)} مورد اول)")
+                .setMessage(p.joinToString("\n\n") { "• ${it.before}\n→ ${it.after}" })
+                .setPositiveButton("تبدیل کن") { _, _ -> onConvert() }
+                .setNegativeButton("بستن", null).show()
+        }
+    }
+
+    private fun onConvert() {
+        if (needCalendar()) return
+        tvConvertStatus.text = "در حال تبدیل…"
+        lifecycleScope.launch {
+            val r = withContext(Dispatchers.IO) { runCatching { converter.convertAll() } }
+            r.onSuccess {
+                toast("✅ ${JalaliConverter.fa(it.converted)} رویداد تبدیل شد (${JalaliConverter.fa(it.skipped)} بدون تاریخ میلادی، ${JalaliConverter.fa(it.readOnly)} فقط‌خواندنی، ${JalaliConverter.fa(it.errors)} خطا)")
+            }.onFailure { toast("خطا: ${it.message}") }
+            refreshAll()
         }
     }
 
     private fun onUndo() {
-        if (!converter.hasBackup()) {
-            Toast.makeText(this, "بکاپی برای بازگردانی نیست", Toast.LENGTH_SHORT).show()
-            return
-        }
         AlertDialog.Builder(this)
-            .setTitle(getString(R.string.dialog_undo_title))
-            .setMessage(getString(R.string.dialog_undo_msg) + "\n\n${converter.backupCount()} عنوان بازگردانی می‌شود.")
-            .setPositiveButton(getString(R.string.btn_ok)) { _, _ ->
-                lifecycleScope.launch(Dispatchers.IO) {
-                    val n = converter.undo()
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(this@MainActivity, "$n عنوان بازگردانی شد", Toast.LENGTH_LONG).show()
-                        refreshStats()
-                        updateButtons()
-                        binding.tvStatus.text = "↩️ بازگردانی انجام شد"
-                    }
+            .setTitle("بازگردانی")
+            .setMessage("متن ${JalaliConverter.fa(converter.backupCount())} رویداد به حالت اول برمی‌گردد. رویدادهایی که بعد از تبدیل ویرایش کرده‌اید دست نمی‌خورند.")
+            .setPositiveButton("بازگردانی") { _, _ ->
+                lifecycleScope.launch {
+                    val r = withContext(Dispatchers.IO) { runCatching { converter.undo() } }
+                    r.onSuccess { toast("↩️ ${JalaliConverter.fa(it.restored)} رویداد بازگردانده شد" + if (it.keptEdited > 0) " (${JalaliConverter.fa(it.keptEdited)} مورد ویرایش‌شده دست نخورد)" else "") }
+                        .onFailure { toast("خطا: ${it.message}") }
+                    refreshAll()
                 }
             }
-            .setNegativeButton(getString(R.string.btn_cancel), null)
-            .show()
-    }
-
-    private fun refreshStats() {
-        if (!hasCalendarPermission()) { binding.tvStats.text = "—"; return }
-        lifecycleScope.launch(Dispatchers.IO) {
-            val cals = try { converter.listCalendars() } catch (_: Exception) { emptyList() }
-            val events = try { converter.listEvents(1000) } catch (_: Exception) { emptyList() }
-            withContext(Dispatchers.Main) {
-                binding.tvStats.text = "تقویم‌ها: ${cals.size}  •  رویدادها: ${events.size}"
-            }
-        }
-    }
-
-    private fun onSystemSettingsClick() {
-        DeviceHelper.openLanguageSettings(this)
-        Toast.makeText(this, DeviceHelper.stepsForA336E(), Toast.LENGTH_LONG).show()
-    }
-
-    private fun onQuickFixClick() {
-        val okApp = SystemLocaleHelper.trySetAppLocaleToPersian(this)
-        val okSys = SystemLocaleHelper.trySetSystemLocaleViaSettings(this)
-        val locale = SystemLocaleHelper.currentLocaleTag()
-        val msg = when {
-            okSys -> "✅ لوکال سیستم به فارسی تغییر کرد ($locale) — تقویم خودکار شمسی می‌شود. اپ را ببند و باز کن."
-            okApp -> "✅ لوکال اپ به فارسی شد. برای کل گوشی: دکمهٔ «باز کردن تنظیمات زبان» → فارسی را اول کن."
-            else -> "برای کل گوشی:\n${DeviceHelper.stepsForA336E()}\n\nلوکال فعلی: $locale"
-        }
-        AlertDialog.Builder(this)
-            .setTitle("وضعیت لوکال: $locale")
-            .setMessage(msg)
-            .setPositiveButton("باز کردن تنظیمات") { _, _ -> DeviceHelper.openLanguageSettings(this) }
-            .setNegativeButton("کپی دستور ADB") { _, _ ->
-                SystemLocaleHelper.copyAdbCommand(this)
-                Toast.makeText(this, "دستور ADB کپی شد", Toast.LENGTH_SHORT).show()
-            }
-            .setNeutralButton("باشه", null)
-            .show()
-        refreshSystemStatus()
-        refreshOverlayStatus()
-    }
-
-    private fun refreshSystemStatus() {
-        val locale = SystemLocaleHelper.currentLocaleTag()
-        val persian = SystemLocaleHelper.isPersianLocale()
-        binding.tvSystemStatus.text = if (persian) "✅ لوکال: $locale — تقویم سیستمی شمسی است"
-        else "⚠️ لوکال: $locale — برای شمسی شدن کل گوشی، فارسی را اول کن"
-        binding.tvSystemStatus.visibility = View.VISIBLE
-    }
-
-    private fun updateButtons() {
-        val hasPerm = hasCalendarPermission()
-        binding.btnPreview.isEnabled = hasPerm
-        binding.btnUndo.isEnabled = hasPerm && converter.hasBackup()
-        binding.btnUndo.alpha = if (binding.btnUndo.isEnabled) 1f else 0.4f
-        binding.btnPreview.alpha = if (hasPerm) 1f else 0.4f
-        refreshSystemStatus()
-        refreshOverlayStatus()
-        refreshShizukuCard()
-    }
-
-    private fun openOverlaySettings() {
-        try {
-            startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
-            Toast.makeText(this, "شمسی‌ساز را در لیست دسترس‌پذیری پیدا و فعال کنید — تاریخ پیام‌ها زنده شمسی می‌شود", Toast.LENGTH_LONG).show()
-        } catch (_: Exception) { DeviceHelper.openLanguageSettings(this) }
-    }
-
-    private fun refreshOverlayStatus() {
-        val enabled = ShamsiOverlayService.isEnabled(this)
-        try {
-            binding.btnOverlay.text = if (enabled) "✅ پوشش پیام‌ها فعال است" else "👁️ فعال‌سازی پوشش پیام‌ها (اختیاری)"
-            binding.tvOverlayStatus.text = if (enabled) "✅ پوشش سیستمی فعال — تاریخ پیام‌ها شمسی نمایش داده می‌شود" else "پوشش خاموش — فعال کنید تا تاریخ‌های داخل پیام‌ها هم زنده شمسی شود"
-            binding.tvOverlayStatus.visibility = View.VISIBLE
-        } catch (_: Exception) {}
-    }
-
-    private fun findTv(id: String): TextView? {
-        return try {
-            val rid = resources.getIdentifier(id, "id", packageName)
-            if (rid != 0) findViewById(rid) else null
-        } catch (_: Exception) { null }
+            .setNegativeButton("لغو", null).show()
     }
 }

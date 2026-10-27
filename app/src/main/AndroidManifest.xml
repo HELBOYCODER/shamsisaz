@@ -2,23 +2,26 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- دسترسی‌های لازم — خودکار درخواست می‌شود -->
+    <!-- تقویم: مناسبت‌ها، رویدادهای هر روز، تبدیل تاریخ داخل رویدادها -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+    <!-- اعلان دائمی «تاریخ امروز» -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.WRITE_SETTINGS"
-        tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
-        tools:ignore="ProtectedPermissions" />
+    <!-- به‌روزرسانی ویجت/اعلان بعد از ری‌استارت گوشی -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- درخواست معافیت از بهینه‌سازی باتری تا آلارم نیمه‌شب حتماً اجرا شود -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- مجوزهای ویژه: فقط با شیزوکو/ADB (pm grant) داده می‌شوند -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CHANGE_CONFIGURATION" tools:ignore="ProtectedPermissions" />
 
-    <!-- برای تشخیص برند گوشی -->
-    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <queries>
         <package android:name="moe.shizuku.privileged.api" />
+        <intent><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.APP_CALENDAR" /></intent>
     </queries>
 
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
@@ -28,7 +31,6 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -36,28 +38,31 @@
             </intent-filter>
         </activity>
 
-        <!-- تنظیمات شمسی — از داخل تنظیمات سیستم قابل دسترسی -->
-        <activity
-            android:name=".SettingsActivity"
-            android:exported="false"
-            android:label="@string/settings_title"
-            android:parentActivityName=".MainActivity" />
-
-        <!-- ویجت تقویم شمسی — جایگزین دائمی تقویم سیستمی روی A33 -->
-        <receiver
-            android:name=".ShamsiWidgetProvider"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/shamsi_widget_info" />
+        <!-- ویجت امروز -->
+        <receiver android:name=".ShamsiWidgetProvider" android:exported="true">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/shamsi_widget_info" />
         </receiver>
-        <receiver android:name=".WidgetUpdateReceiver" android:exported="false">
+
+        <!-- ویجت ماهانه -->
+        <receiver android:name=".ShamsiMonthWidgetProvider" android:exported="true">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/shamsi_month_widget_info" />
+        </receiver>
+
+        <!-- بوت، تغییر تاریخ/ساعت/منطقهٔ زمانی، آپدیت اپ، آلارم نیمه‌شب و دکمه‌های ویجت -->
+        <receiver android:name=".SystemReceiver" android:exported="false">
             <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.DATE_CHANGED" />
                 <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.LOCALE_CHANGED" />
+                <action android:name="com.shamsisaz.jalali.DAY_TICK" />
+                <action android:name="com.shamsisaz.jalali.WIDGET_PREV" />
+                <action android:name="com.shamsisaz.jalali.WIDGET_NEXT" />
+                <action android:name="com.shamsisaz.jalali.WIDGET_TODAY" />
             </intent-filter>
         </receiver>
 

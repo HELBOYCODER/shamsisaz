@@ -1,36 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">شمسی‌ساز</string>
-    <string name="app_name_en">ShamsiSaz</string>
-    <string name="subtitle">تبدیل تقویم میلادی به شمسی — کل گوشی</string>
-    <string name="btn_magic">✨ تبدیل کل تقویم به شمسی</string>
-    <string name="btn_settings">⚙️ تنظیمات سیستم</string>
-    <string name="btn_preview">👁 پیش‌نمایش قبل از تبدیل</string>
-    <string name="btn_undo">↩️ بازگردانی</string>
-    <string name="btn_open_system_settings">باز کردن تنظیمات سیستم</string>
-    <string name="settings_title">تنظیمات شمسی‌ساز</string>
-    <string name="tile_label">شمسی‌ساز</string>
-    <string name="tile_desc">تبدیل تقویم به شمسی</string>
-    <string name="status_idle">آماده — یک دکمه تا شمسی شدن</string>
-    <string name="status_converting">در حال تبدیل…</string>
-    <string name="status_done">✅ همهٔ رویدادها به شمسی تبدیل شد!</string>
-    <string name="status_preview">🔍 پیش‌نمایش:</string>
-    <string name="status_no_events">هیچ رویدادی یافت نشد</string>
-    <string name="status_permission_needed">برای ادامه دسترسی تقویم را بدهید</string>
-    <string name="brand_detected">گوشی شناسایی شد: %1$s</string>
-    <string name="system_locale_hint">برای شمسی شدن تقویم سیستمی (سامسونگ A336E): تنظیمات → مدیریت عمومی → زبان → افزودن زبان → فارسی → بکش به اول لیست → اعمال.\nبعدش تقویم خودکار شمسی می‌شود.</string>
-    <string name="miui_hint">شیائومی: تنظیمات → زبان و منطقه → فارسی را اول کن — سپس تقویم را باز کن.</string>
-    <string name="oneui_hint">سامسونگ A33 (SM-A336E): تنظیمات → مدیریت عمومی → زبان → افزودن زبان → فارسی → به بالا بکش → اعمال</string>
-    <string name="notify_title">شمسی‌ساز</string>
-    <string name="notify_done">تبدیل کامل شد — %1$d رویداد به شمسی</string>
-    <string name="dialog_preview_title">پیش‌نمایش تبدیل</string>
-    <string name="dialog_undo_title">بازگردانی</string>
-    <string name="dialog_undo_msg">آیا می‌خواهید همهٔ تغییرات را به حالت میلادی برگردانید؟</string>
-    <string name="btn_ok">تأیید</string>
-    <string name="btn_cancel">لغو</string>
-    <string name="perm_rationale">برای تبدیل تاریخ‌های تقویم، دسترسی خواندن و نوشتن تقویم لازم است.</string>
-    <string name="stats_events">رویدادها: %1$d</string>
-    <string name="stats_calendars">تقویم‌ها: %1$d</string>
-    <string name="widget_desc">ویجت تاریخ شمسی برای صفحهٔ اصلی</string>
-    <string name="accessibility_desc">سرویس شمسی‌ساز — تاریخ‌های انگلیسی روی صفحه را به شمسی نمایش می‌دهد (فقط نمایش، بدون تغییر دائمی). برای تقویم، دکمهٔ داخل اپ را بزنید.</string>
+    <string name="tile_label">تاریخ شمسی</string>
+    <string name="widget_desc">ویجت «امروز» — تاریخ شمسی، میلادی و قمری</string>
+    <string name="widget_month_desc">ویجت ماهانهٔ شمسی با تعطیلات رسمی</string>
+    <string name="accessibility_desc">پوشش شمسی: تاریخ‌های میلادی روی صفحه (هدر تقویم، پیام‌ها، اعلان‌ها) را با برچسب شمسی می‌پوشاند. فقط روی دستگاه کار می‌کند؛ هیچ متنی ذخیره یا ارسال نمی‌شود.</string>
 </resources>
