@@ -1,221 +1,171 @@
 package com.shamsisaz.jalali
 
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
-import android.database.Cursor
 import android.provider.CalendarContract
+import org.json.JSONObject
+import java.io.File
 
 /**
- * هستهٔ تبدیل تقویم — همهٔ رویدادهای میلادی را به شمسی می‌برد.
- * - تاریخ‌های داخل title/description/location را شمسی می‌کند
- * - یک بکاپ سبک در SharedPreferences نگه می‌دارد برای بازگردانی
- * - روی سامسونگ (One UI Calendar) و شیائومی (MIUI Calendar) تست‌شده — هر دو از CalendarProvider استاندارد استفاده می‌کنند
+ * تبدیل تاریخ‌های میلادیِ نوشته‌شده «داخل متن» رویدادها (عنوان، توضیحات، مکان) به شمسی.
+ * - چیزی به عنوان اضافه نمی‌شود؛ فقط تاریخ‌های میلادی داخل متن عوض می‌شوند.
+ * - اصل متن‌ها در فایل پشتیبان ذخیره می‌شود و «بازگردانی» فقط فیلدهایی را برمی‌گرداند که کاربر بعد از تبدیل ویرایش نکرده.
+ * - تقویم‌های فقط‌خواندنی (مثل تعطیلات گوگل) و تقویم مناسبت‌های خودِ اپ دست‌نخورده می‌مانند.
  */
 class CalendarConverter(private val context: Context) {
 
-    data class EventInfo(
-        val id: Long,
-        val title: String?,
-        val description: String?,
-        val location: String?,
-        val dtStart: Long,
-        val dtEnd: Long?,
-        val calendarId: Long
-    )
+    data class EventInfo(val id: Long, val title: String?, val description: String?, val location: String?, val calendarId: Long)
 
-    data class ConvertResult(
-        val total: Int,
-        val converted: Int,
-        val skipped: Int,
-        val calendars: Int,
-        val errors: Int
-    )
+    data class ConvertResult(val total: Int, val converted: Int, val skipped: Int, val readOnly: Int, val errors: Int)
 
-    private val prefs get() = context.getSharedPreferences("shamsisaz_backup", Context.MODE_PRIVATE)
+    data class Change(val before: String, val after: String)
 
-    fun listCalendars(): List<Pair<Long, String>> {
-        val out = mutableListOf<Pair<Long, String>>()
-        val cr = context.contentResolver ?: return out
-        val cur: Cursor? = try {
-            cr.query(
-                CalendarContract.Calendars.CONTENT_URI,
-                arrayOf(CalendarContract.Calendars._ID, CalendarContract.Calendars.CALENDAR_DISPLAY_NAME),
-                null, null, null
-            )
-        } catch (_: Exception) { null }
-        cur?.use {
-            val idIdx = it.getColumnIndex(CalendarContract.Calendars._ID)
-            val nameIdx = it.getColumnIndex(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME)
+    private val backupFile get() = File(context.filesDir, "calendar_backup.json")
+
+    private fun writableCalendarIds(): Set<Long> {
+        val out = HashSet<Long>()
+        val own = HolidayCalendar.calendarId(context)
+        context.contentResolver.query(
+            CalendarContract.Calendars.CONTENT_URI,
+            arrayOf(CalendarContract.Calendars._ID, CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL),
+            null, null, null
+        )?.use {
             while (it.moveToNext()) {
-                val id = if (idIdx >= 0) it.getLong(idIdx) else -1
-                val name = if (nameIdx >= 0) it.getString(nameIdx) ?: "تقویم $id" else "تقویم $id"
-                out.add(id to name)
+                val id = it.getLong(0)
+                if (id != own && it.getInt(1) >= CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR) out.add(id)
             }
         }
         return out
     }
 
-    fun listEvents(limit: Int = 200): List<EventInfo> {
-        val out = mutableListOf<EventInfo>()
-        val cr = context.contentResolver ?: return out
-        val cur: Cursor? = try {
-            cr.query(
-                CalendarContract.Events.CONTENT_URI,
-                arrayOf(
-                    CalendarContract.Events._ID,
-                    CalendarContract.Events.TITLE,
-                    CalendarContract.Events.DESCRIPTION,
-                    CalendarContract.Events.EVENT_LOCATION,
-                    CalendarContract.Events.DTSTART,
-                    CalendarContract.Events.DTEND,
-                    CalendarContract.Events.CALENDAR_ID
-                ),
-                null, null, "${CalendarContract.Events.DTSTART} DESC LIMIT $limit"
-            )
-        } catch (_: Exception) { null }
-        cur?.use {
-            val idIdx = it.getColumnIndex(CalendarContract.Events._ID)
-            val tIdx = it.getColumnIndex(CalendarContract.Events.TITLE)
-            val dIdx = it.getColumnIndex(CalendarContract.Events.DESCRIPTION)
-            val lIdx = it.getColumnIndex(CalendarContract.Events.EVENT_LOCATION)
-            val sIdx = it.getColumnIndex(CalendarContract.Events.DTSTART)
-            val eIdx = it.getColumnIndex(CalendarContract.Events.DTEND)
-            val cIdx = it.getColumnIndex(CalendarContract.Events.CALENDAR_ID)
+    fun calendarCount(): Int = context.contentResolver.query(
+        CalendarContract.Calendars.CONTENT_URI, arrayOf(CalendarContract.Calendars._ID), null, null, null
+    )?.use { it.count } ?: 0
+
+    fun listEvents(): List<EventInfo> {
+        val out = ArrayList<EventInfo>()
+        context.contentResolver.query(
+            CalendarContract.Events.CONTENT_URI,
+            arrayOf(
+                CalendarContract.Events._ID, CalendarContract.Events.TITLE, CalendarContract.Events.DESCRIPTION,
+                CalendarContract.Events.EVENT_LOCATION, CalendarContract.Events.CALENDAR_ID
+            ),
+            "${CalendarContract.Events.DELETED}=0", null, "${CalendarContract.Events.DTSTART} DESC"
+        )?.use {
             while (it.moveToNext()) {
-                out.add(
-                    EventInfo(
-                        id = if (idIdx >= 0) it.getLong(idIdx) else -1,
-                        title = if (tIdx >= 0) it.getString(tIdx) else null,
-                        description = if (dIdx >= 0) it.getString(dIdx) else null,
-                        location = if (lIdx >= 0) it.getString(lIdx) else null,
-                        dtStart = if (sIdx >= 0) it.getLong(sIdx) else 0L,
-                        dtEnd = if (eIdx >= 0 && !it.isNull(eIdx)) it.getLong(eIdx) else null,
-                        calendarId = if (cIdx >= 0) it.getLong(cIdx) else -1
-                    )
-                )
+                out.add(EventInfo(it.getLong(0), it.getString(1), it.getString(2), it.getString(3), it.getLong(4)))
             }
         }
         return out
     }
 
-    /** پیش‌نمایش: بدون نوشتن، فقط بگو چه می‌شود — برای dialog */
-    fun preview(limit: Int = 20): List<Pair<String, String>> {
-        val events = listEvents(limit)
-        return events.mapNotNull { ev ->
-            val original = ev.title ?: return@mapNotNull null
-            val converted = convertText(original) ?: return@mapNotNull null
-            if (converted != original) Pair(original, converted) else null
+    fun eventCount(): Int = listEvents().size
+
+    private fun convertField(s: String?): String? = if (s.isNullOrBlank()) s else JalaliEngine.convertAll(s)
+
+    /** پیش‌نمایش بدون هیچ نوشتنی */
+    fun preview(limit: Int = 15): List<Change> {
+        val ids = writableCalendarIds()
+        val out = ArrayList<Change>()
+        for (ev in listEvents()) {
+            if (ev.calendarId !in ids) continue
+            for ((old, new) in listOf(ev.title to convertField(ev.title), ev.description to convertField(ev.description), ev.location to convertField(ev.location))) {
+                if (old != null && new != null && old != new) {
+                    out.add(Change(old.take(160), new.take(160)))
+                    break
+                }
+            }
+            if (out.size >= limit) break
         }
+        return out
     }
 
-    fun convertText(text: String?): String? {
-        if (text.isNullOrBlank()) return text
-        return JalaliEngine.convertAll(text)
-    }
-
-    private fun needsConversion(title: String?): Boolean {
-        if (title.isNullOrBlank()) return false
-        // اگر قبلاً نشان [شمسی] دارد، رد کن
-        if (title.contains("شمسی") || title.contains("جلالی")) return false
-        return true
-    }
-
-    /**
-     * تبدیل اصلی — همهٔ رویدادها
-     * @param addPrefix اگر true، تاریخ شمسی را به ابتدای عنوان اضافه می‌کند
-     * @param convertBody اگر true، توضیحات و مکان را هم تبدیل می‌کند
-     */
-    fun convertAll(
-        addPrefix: Boolean = true,
-        convertBody: Boolean = true,
-        onProgress: ((done: Int, total: Int) -> Unit)? = null
-    ): ConvertResult {
-        val events = listEvents(limit = 1000)
-        val calendars = listCalendars().size
-        var converted = 0
-        var skipped = 0
-        var errors = 0
-
-        // بکاپ عنوان‌های اصلی برای undo
-        val backup = mutableMapOf<String, String>()
-
-        events.forEachIndexed { idx, ev ->
+    fun convertAll(onProgress: ((done: Int, total: Int) -> Unit)? = null): ConvertResult {
+        val ids = writableCalendarIds()
+        val events = listEvents()
+        val backup = loadBackup()
+        var converted = 0; var skipped = 0; var readOnly = 0; var errors = 0
+        events.forEachIndexed { i, ev ->
+            onProgress?.invoke(i, events.size)
+            if (ev.calendarId !in ids) { readOnly++; return@forEachIndexed }
+            val nt = convertField(ev.title); val nd = convertField(ev.description); val nl = convertField(ev.location)
+            if (nt == ev.title && nd == ev.description && nl == ev.location) { skipped++; return@forEachIndexed }
             try {
-                onProgress?.invoke(idx, events.size)
-                if (!needsConversion(ev.title)) { skipped++; return@forEachIndexed }
-
-                val jDate = JalaliConverter.fromMillis(ev.dtStart)
-                val jStr = jDate.formatNumeric() // 1403/07/12
-                val jPretty = jDate.formatPersian() // 12 مهر 1403
-
-                var newTitle = ev.title ?: ""
-                // هر تاریخ انگلیسی/عددی داخل عنوان را با موتور کامل شمسی کن
-                newTitle = JalaliEngine.convertAll(newTitle)
-
-                // اگر عنوان هنوز تاریخ نداشت، تاریخ شمسی رویداد را اضافه کن
-                if (addPrefix && !newTitle.contains(jStr) && !newTitle.contains(jPretty)) {
-                    // اگر عنوان خالی بود، فقط تاریخ
-                    newTitle = if (newTitle.isBlank()) jPretty else "$newTitle — $jPretty [$jStr]"
-                }
-
-                var newDesc = ev.description
-                if (convertBody) newDesc = convertText(newDesc)
-                var newLoc = ev.location
-                if (convertBody) newLoc = convertText(newLoc)
-
-                // اگر هیچ تغییری نکرد، رد کن
-                if (newTitle == ev.title && newDesc == ev.description && newLoc == ev.location) {
-                    skipped++; return@forEachIndexed
-                }
-
-                backup[ev.id.toString()] = ev.title ?: ""
-
-                val values = ContentValues().apply {
-                    put(CalendarContract.Events.TITLE, newTitle)
-                    if (newDesc != ev.description) put(CalendarContract.Events.DESCRIPTION, newDesc)
-                    if (newLoc != ev.location) put(CalendarContract.Events.EVENT_LOCATION, newLoc)
-                }
-                val uri = android.content.ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, ev.id)
-                val rows = context.contentResolver.update(uri, values, null, null)
-                if (rows > 0) converted++ else skipped++
-            } catch (_: Exception) {
-                errors++
-            }
+                val v = ContentValues()
+                if (nt != ev.title) v.put(CalendarContract.Events.TITLE, nt)
+                if (nd != ev.description) v.put(CalendarContract.Events.DESCRIPTION, nd)
+                if (nl != ev.location) v.put(CalendarContract.Events.EVENT_LOCATION, nl)
+                val uri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, ev.id)
+                if (context.contentResolver.update(uri, v, null, null) > 0) {
+                    val key = ev.id.toString()
+                    val entry = backup.optJSONObject(key) ?: JSONObject()
+                    // اولین اصل متن را نگه می‌داریم، حتی اگر بعداً دوباره تبدیل شود
+                    fun put(name: String, original: String?, newValue: String?, changed: Boolean) {
+                        if (!changed) return
+                        if (!entry.has("o_$name")) entry.put("o_$name", original ?: JSONObject.NULL)
+                        entry.put("n_$name", newValue ?: JSONObject.NULL)
+                    }
+                    put("title", ev.title, nt, nt != ev.title)
+                    put("desc", ev.description, nd, nd != ev.description)
+                    put("loc", ev.location, nl, nl != ev.location)
+                    backup.put(key, entry)
+                    converted++
+                } else skipped++
+            } catch (_: Exception) { errors++ }
         }
-        // ذخیره بکاپ برای بازگردانی
-        if (backup.isNotEmpty()) {
-            val ed = prefs.edit()
-            backup.forEach { (k, v) -> ed.putString("bk_$k", v) }
-            ed.putLong("bk_time", System.currentTimeMillis())
-            ed.putInt("bk_count", backup.size)
-            ed.apply()
-        }
+        saveBackup(backup)
         onProgress?.invoke(events.size, events.size)
-        return ConvertResult(events.size, converted, skipped, calendars, errors)
+        return ConvertResult(events.size, converted, skipped, readOnly, errors)
     }
 
-    fun undo(): Int {
-        val all = prefs.all
-        var restored = 0
-        for ((k, v) in all) {
-            if (!k.startsWith("bk_") || k == "bk_time" || k == "bk_count") continue
-            val idStr = k.removePrefix("bk_")
-            val id = idStr.toLongOrNull() ?: continue
-            val originalTitle = v as? String ?: continue
+    data class UndoResult(val restored: Int, val keptEdited: Int)
+
+    fun undo(): UndoResult {
+        val backup = loadBackup()
+        var restored = 0; var kept = 0
+        val keys = backup.keys().asSequence().toList()
+        for (key in keys) {
+            val id = key.toLongOrNull() ?: continue
+            val entry = backup.getJSONObject(key)
             try {
-                val uri = android.content.ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id)
-                val values = ContentValues().apply { put(CalendarContract.Events.TITLE, originalTitle) }
-                val rows = context.contentResolver.update(uri, values, null, null)
-                if (rows > 0) restored++
+                val uri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id)
+                val cur = context.contentResolver.query(
+                    uri, arrayOf(CalendarContract.Events.TITLE, CalendarContract.Events.DESCRIPTION, CalendarContract.Events.EVENT_LOCATION),
+                    null, null, null
+                )?.use { if (it.moveToFirst()) arrayOf(it.getString(0), it.getString(1), it.getString(2)) else null }
+                if (cur == null) { backup.remove(key); continue } // رویداد حذف شده
+                val v = ContentValues()
+                var skippedAny = false
+                fun restore(name: String, column: String, current: String?) {
+                    if (!entry.has("o_$name")) return
+                    val expected = entry.opt("n_$name").let { if (it == JSONObject.NULL) null else it as String? }
+                    if (current != expected) { skippedAny = true; return }
+                    val orig = entry.opt("o_$name").let { if (it == JSONObject.NULL) null else it as String? }
+                    v.put(column, orig)
+                }
+                restore("title", CalendarContract.Events.TITLE, cur[0])
+                restore("desc", CalendarContract.Events.DESCRIPTION, cur[1])
+                restore("loc", CalendarContract.Events.EVENT_LOCATION, cur[2])
+                if (v.size() > 0 && context.contentResolver.update(uri, v, null, null) > 0) restored++
+                if (skippedAny) kept++
+                backup.remove(key)
             } catch (_: Exception) { }
         }
-        // پاک کردن بکاپ بعد از بازگردانی
-        val ed = prefs.edit()
-        for (k in all.keys.toList()) if (k.startsWith("bk_")) ed.remove(k)
-        ed.apply()
-        return restored
+        saveBackup(backup)
+        return UndoResult(restored, kept)
     }
 
-    fun hasBackup(): Boolean = prefs.getInt("bk_count", 0) > 0
-    fun backupCount(): Int = prefs.getInt("bk_count", 0)
+    fun backupCount(): Int = loadBackup().length()
+    fun hasBackup(): Boolean = backupCount() > 0
+
+    private fun loadBackup(): JSONObject = try {
+        if (backupFile.exists()) JSONObject(backupFile.readText()) else JSONObject()
+    } catch (_: Exception) { JSONObject() }
+
+    private fun saveBackup(o: JSONObject) {
+        try {
+            if (o.length() == 0) backupFile.delete() else backupFile.writeText(o.toString())
+        } catch (_: Exception) { }
+    }
 }

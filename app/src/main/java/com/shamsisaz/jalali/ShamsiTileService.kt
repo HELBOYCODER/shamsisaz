@@ -1,56 +1,37 @@
 package com.shamsisaz.jalali
 
+import android.app.PendingIntent
+import android.content.Intent
+import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
-import android.widget.Toast
 
-/**
- * کاشی تنظیمات سریع — از پنل نوتیفیکیشن با یک لمس تبدیل کن
- * روی One UI و MIUI هر دو کار می‌کند (API 24+)
- */
+/** کاشی تنظیمات سریع: برچسب = تاریخ شمسی امروز؛ با لمس، اپ باز می‌شود */
 class ShamsiTileService : TileService() {
 
     override fun onStartListening() {
         super.onStartListening()
+        val t = JalaliConverter.today()
         qsTile?.apply {
-            label = "شمسی‌ساز"
-            contentDescription = "تبدیل تقویم به شمسی"
-            state = Tile.STATE_INACTIVE
+            label = "${JalaliConverter.fa(t.day)} ${t.monthName()}"
+            if (Build.VERSION.SDK_INT >= 29) subtitle = JalaliConverter.weekDayNames[t.weekDay()]
+            contentDescription = JalaliConverter.fullPersian(t)
+            state = Tile.STATE_ACTIVE
             updateTile()
         }
     }
 
     override fun onClick() {
         super.onClick()
-        val ctx = this
-        // چک دسترسی
-        val hasPerm = ctx.checkSelfPermission(android.Manifest.permission.READ_CALENDAR) ==
-                android.content.pm.PackageManager.PERMISSION_GRANTED
-        if (!hasPerm) {
-            Toast.makeText(ctx, "اول اپ را باز کن و دسترسی تقویم را بده", Toast.LENGTH_LONG).show()
-            // باز کردن اپ برای گرفتن دسترسی
-            val intent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
-                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            if (intent != null) startActivityAndCollapse(intent)
-            return
+        val intent = Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (Build.VERSION.SDK_INT >= 34) {
+            startActivityAndCollapse(PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+        } else {
+            legacyCollapse(intent)
         }
-        qsTile?.state = Tile.STATE_ACTIVE
-        qsTile?.updateTile()
-        Thread {
-            try {
-                val conv = CalendarConverter(ctx)
-                val r = conv.convertAll()
-                android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    Toast.makeText(ctx, "✅ ${r.converted} رویداد شمسی شد", Toast.LENGTH_LONG).show()
-                }
-            } catch (_: Exception) {
-                android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    Toast.makeText(ctx, "خطا در تبدیل", Toast.LENGTH_SHORT).show()
-                }
-            }
-            qsTile?.state = Tile.STATE_INACTIVE
-            qsTile?.updateTile()
-        }.start()
     }
+
+    @Suppress("DEPRECATION")
+    @android.annotation.SuppressLint("StartActivityAndCollapseDeprecated")
+    private fun legacyCollapse(intent: Intent) = startActivityAndCollapse(intent)
 }

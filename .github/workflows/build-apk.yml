@@ -2,7 +2,9 @@ name: Build ShamsiSaz APK
 
 on:
   push:
-    branches: [main, master]
+    branches: ['**']
+    paths-ignore: ['**.md', 'dist/**']
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -23,41 +25,56 @@ jobs:
 
       - name: Setup Android SDK
         run: |
-          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null || true
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace
+      - name: Unit tests (تاریخ‌ها، مناسبت‌ها، Robolectric)
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Lint
+        run: ./gradlew lintDebug --stacktrace
+
+      - name: Build signed release APK
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Name the APK
+        id: apk
+        run: |
+          VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          cp app/build/outputs/apk/release/app-release.apk "ShamsiSaz-v${VERSION}.apk"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "file=ShamsiSaz-v${VERSION}.apk" >> "$GITHUB_OUTPUT"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ShamsiSaz-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: ShamsiSaz-v${{ steps.apk.outputs.version }}
+          path: ${{ steps.apk.outputs.file }}
+
+      - name: Upload test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          path: |
+            app/build/reports/tests
+            app/build/reports/lint-results-debug.html
 
       - name: Create Release
-        if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: "شمسی‌ساز v1.0.${{ github.run_number }}"
+          tag_name: v${{ steps.apk.outputs.version }}-b${{ github.run_number }}
+          name: "شمسی‌ساز v${{ steps.apk.outputs.version }}"
+          files: ${{ steps.apk.outputs.file }}
           body: |
-            ## شمسی‌ساز — یک‌دکمه تبدیل تقویم به شمسی ☀️
+            ## شمسی‌ساز ${{ steps.apk.outputs.version }} ☀️
 
-            - ✨ یک دکمه: همهٔ رویدادهای تقویم میلادی → شمسی
-            - ⚙️ میانبر تنظیمات سیستم: کل گوشی را از تنظیمات شمسی کن
-            - 📱 پشتیبانی کامل سامسونگ (One UI) و شیائومی (MIUI)
-            - 🔍 پیش‌نمایش قبل از تبدیل + ↩️ بازگردانی کامل
-            - 📶 آفلاین — بدون نیاز به اینترنت
+            تقویم شمسی کامل با تعطیلات رسمی، ویجت ماهانه، تاریخ در نوار وضعیت، افزودن مناسبت‌های ایران به تقویم گوشی،
+            تبدیل تاریخ‌های میلادیِ داخل رویدادها (با بازگردانی) و فارسی‌سازی سیستم با شیزوکو.
 
             ### نصب
-            1. فایل `ShamsiSaz-v1.0.apk` را دانلود کن
-            2. روی گوشی نصب کن
-            3. اپ را باز کن — دسترسی تقویم را بده — دکمهٔ جادویی را بزن!
-
-            > اندروید ۷ به بالا — همهٔ برندها
-          files: app/build/outputs/apk/debug/app-debug.apk
-          generate_release_notes: false
+            فایل APK را دانلود و نصب کنید (اندروید ۷ به بالا). همهٔ نسخه‌ها با یک کلید امضا می‌شوند و روی هم آپدیت می‌شوند.
